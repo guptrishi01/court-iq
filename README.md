@@ -42,20 +42,24 @@ The database uses three normalized tables:
 - **`set`** — Set-level data linked to a match (set number, score)
 - **`point`** — Individual point data linked to a set (serve data, point outcome, net approaches)
 
-All aggregate statistics are derived from the `point` table through queries rather than stored redundantly. See [`database/schema.sql`](database/schema.sql) for the full schema with example queries.
+All aggregate statistics are derived from the `point` table through queries rather than stored redundantly. See [`data/schema.sql`](data/schema.sql) for the full schema with example queries.
 
 ## Project Structure
 
 ```
 court-iq/
 ├── README.md
+├── CLAUDE.md
 ├── .gitignore
-├── database/
+├── data/
 │   └── schema.sql              # SQL table definitions and example queries
 ├── docs/
 │   └── stat-definitions.md     # What each stat means and how it's calculated
+├── src/
+│   └── swingvision_import/     # SwingVision export -> staged JSON -> SQL pipeline
+├── tests/
+│   └── swingvision_import/     # pytest suite, mirrors src/swingvision_import/
 ├── frontend/                   # Match logging form + stats dashboard (TBD)
-├── backend/                    # API server + database layer (TBD)
 └── ai/                         # AI coaching engine — prompt design, context
                                 # building, insight generation (TBD)
 ```

@@ -26,7 +26,7 @@ CREATE TABLE match (
 -- SET TABLE
 -- Each match has 2-3 sets
 -- ============================================
-CREATE TABLE set (
+CREATE TABLE "set" (
     set_id          INTEGER PRIMARY KEY AUTOINCREMENT,
     match_id        INTEGER NOT NULL,
     set_number      INTEGER NOT NULL CHECK (set_number BETWEEN 1 AND 3),
@@ -68,7 +68,7 @@ CREATE TABLE point (
     notes            TEXT,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    FOREIGN KEY (set_id) REFERENCES set(set_id) ON DELETE CASCADE
+    FOREIGN KEY (set_id) REFERENCES "set"(set_id) ON DELETE CASCADE
 );
 
 -- ============================================
@@ -77,7 +77,7 @@ CREATE TABLE point (
 -- ============================================
 
 -- Fetch all sets for a match
-CREATE INDEX idx_set_match_id ON set(match_id);
+CREATE INDEX idx_set_match_id ON "set"(match_id);
 
 -- Fetch all points for a set
 CREATE INDEX idx_point_set_id ON point(set_id);
@@ -102,7 +102,7 @@ CREATE INDEX idx_match_date ON match(date);
 --     COUNT(*) AS total_points_played,
 --     SUM(CASE WHEN point_won = TRUE THEN 1 ELSE 0 END) AS total_points_won
 -- FROM point p
--- JOIN set s ON p.set_id = s.set_id
+-- JOIN "set" s ON p.set_id = s.set_id
 -- WHERE s.match_id = ?;
 
 -- First Serve Percentage (match level)
@@ -114,7 +114,7 @@ CREATE INDEX idx_match_date ON match(date);
 --         1
 --     ) AS first_serve_pct
 -- FROM point p
--- JOIN set s ON p.set_id = s.set_id
+-- JOIN "set" s ON p.set_id = s.set_id
 -- WHERE s.match_id = ? AND p.is_serving = TRUE;
 
 -- Aces & Double Faults (match level)
@@ -122,7 +122,7 @@ CREATE INDEX idx_match_date ON match(date);
 --     SUM(CASE WHEN point_end_type = 'ace' THEN 1 ELSE 0 END) AS aces,
 --     SUM(CASE WHEN point_end_type = 'double_fault' THEN 1 ELSE 0 END) AS double_faults
 -- FROM point p
--- JOIN set s ON p.set_id = s.set_id
+-- JOIN "set" s ON p.set_id = s.set_id
 -- WHERE s.match_id = ?;
 
 -- Winners & Errors breakdown (match level)
@@ -133,7 +133,7 @@ CREATE INDEX idx_match_date ON match(date);
 --     SUM(CASE WHEN point_end_type = 'return_winner' THEN 1 ELSE 0 END) AS return_winners,
 --     SUM(CASE WHEN point_end_type = 'return_error' THEN 1 ELSE 0 END) AS return_errors
 -- FROM point p
--- JOIN set s ON p.set_id = s.set_id
+-- JOIN "set" s ON p.set_id = s.set_id
 -- WHERE s.match_id = ?;
 
 -- Net Approach Effectiveness (match level)
@@ -141,5 +141,5 @@ CREATE INDEX idx_match_date ON match(date);
 --     SUM(CASE WHEN net_approach = TRUE THEN 1 ELSE 0 END) AS net_approaches,
 --     SUM(CASE WHEN net_approach = TRUE AND net_point_won = TRUE THEN 1 ELSE 0 END) AS net_points_won
 -- FROM point p
--- JOIN set s ON p.set_id = s.set_id
+-- JOIN "set" s ON p.set_id = s.set_id
 -- WHERE s.match_id = ?;

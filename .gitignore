@@ -13,6 +13,9 @@ __pycache__/
 *.sqlite
 *.sqlite3
 
+# SwingVision staging data - personal match data, not code
+src/swingvision_import/pending/
+
 # IDE
 .vscode/
 .idea/
@@ -24,3 +27,8 @@ Thumbs.db
 # Build
 dist/
 build/
+
+# Test / coverage artifacts
+.coverage
+.pytest_cache/
+htmlcov/
