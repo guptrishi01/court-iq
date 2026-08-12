@@ -16,6 +16,10 @@ __pycache__/
 # SwingVision staging data - personal match data, not code
 src/swingvision_import/pending/
 
+# Generated AI coaching reports and rendered HTML - personal data, not code
+ai/reports/
+reports/output/
+
 # IDE
 .vscode/
 .idea/
@@ -32,3 +36,6 @@ build/
 .coverage
 .pytest_cache/
 htmlcov/
+
+# Personal working notes - never staged
+todo.txt

@@ -1,9 +1,9 @@
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 
 [tool.coverage.run]
-source = ["swingvision_import"]
+source = ["swingvision_import", "stats", "ai", "reports"]
 
 [tool.ruff]
 line-length = 100

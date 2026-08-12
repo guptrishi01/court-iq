@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Court IQ — Match History ({{ match_count }} matches)</title>
+<style>
+  {{ palette_css }}
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: var(--page);
+    color: var(--ink-primary);
+  }
+  .report { max-width: 720px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; }
+  .subtitle { color: var(--ink-secondary); font-size: 14px; }
+  section { margin-bottom: 32px; }
+  section h2 { font-size: 16px; border-bottom: 1px solid var(--gridline); padding-bottom: 8px; }
+</style>
+</head>
+<body>
+<div class="viz-root report">
+  <h1>Match History</h1>
+  <p class="subtitle">{{ match_count }} match{{ "es" if match_count != 1 else "" }} tracked.</p>
+
+  <section>
+    <h2>Match Results</h2>
+    {{ win_loss_strip | safe }}
+  </section>
+
+  <section>
+    <h2>First Serve % Trend</h2>
+    {{ fs_chart | safe }}
+  </section>
+
+  <section>
+    <h2>Winner : Unforced Error Ratio Trend</h2>
+    {{ ue_chart | safe }}
+  </section>
+
+  <section>
+    <h2>Break Point Conversion Trend</h2>
+    {{ bp_chart | safe }}
+  </section>
+</div>
+</body>
+</html>
