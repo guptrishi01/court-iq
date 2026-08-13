@@ -65,3 +65,17 @@ def test_call_specialist_passes_model_and_sampling_config_through():
     assert call["model"] == "claude-sonnet-5"
     assert call["max_tokens"] == 512
     assert call["temperature"] == 0.3
+
+
+def test_call_specialist_wraps_a_real_api_failure_as_specialist_error():
+    # The API call itself failing (auth, rate limit, network) is a
+    # different failure mode than a malformed response, but must be caught
+    # the same way - not left to propagate and kill the whole report.
+    client = FakeAnthropicClient(api_error_for={"strategy"})
+
+    with pytest.raises(SpecialistError) as exc_info:
+        call_specialist(client, AICoachConfig(), "strategy", "You are a strategy analyst.")
+
+    assert exc_info.value.category == "strategy"
+    assert exc_info.value.raw_response == ""
+    assert "simulated connection failure" in str(exc_info.value)

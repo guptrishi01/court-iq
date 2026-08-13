@@ -17,6 +17,7 @@ from ai.records import CoachingReport
 from stats.models import MatchStats
 
 from . import charts, palette
+from .config import ReportConfig
 
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
@@ -112,19 +113,27 @@ def render_match_report(
 
 def render_match_report_to_file(
     match_stats: MatchStats,
-    output_path: Path,
+    output_path: Path | None = None,
     coaching_report: CoachingReport | None = None,
+    config: ReportConfig | None = None,
 ) -> Path:
     """Renders and writes a match report to disk.
 
     Args:
         match_stats: The match's derived stats bundle.
-        output_path: Where to write the .html file.
+        output_path: Where to write the .html file. Defaults to
+            `config.output_dir / f"{match_stats.match_id}.html"` if not
+            given.
         coaching_report: The match's AI coaching report, if any.
+        config: Supplies the default output directory when output_path
+            isn't given. Defaults to ReportConfig() if not given.
 
     Returns:
         The path written to.
     """
+    if output_path is None:
+        config = config or ReportConfig()
+        output_path = config.output_dir / f"{match_stats.match_id}.html"
     html_text = render_match_report(match_stats, coaching_report)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html_text, encoding="utf-8")
@@ -173,16 +182,26 @@ def render_history_report(matches: list[MatchStats]) -> str:
     return template.render(**context)
 
 
-def render_history_report_to_file(matches: list[MatchStats], output_path: Path) -> Path:
+def render_history_report_to_file(
+    matches: list[MatchStats],
+    output_path: Path | None = None,
+    config: ReportConfig | None = None,
+) -> Path:
     """Renders and writes a cross-match history report to disk.
 
     Args:
         matches: MatchStats for each match, ordered oldest to newest.
-        output_path: Where to write the .html file.
+        output_path: Where to write the .html file. Defaults to
+            `config.output_dir / "history.html"` if not given.
+        config: Supplies the default output directory when output_path
+            isn't given. Defaults to ReportConfig() if not given.
 
     Returns:
         The path written to.
     """
+    if output_path is None:
+        config = config or ReportConfig()
+        output_path = config.output_dir / "history.html"
     html_text = render_history_report(matches)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(html_text, encoding="utf-8")

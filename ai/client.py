@@ -11,6 +11,8 @@ import json
 import logging
 from typing import Protocol
 
+import anthropic
+
 from .config import AICoachConfig
 from .records import Category, CoachingItem, DrillItem, FitnessItem, SupportingStat
 
@@ -49,15 +51,23 @@ class AnthropicClientLike(Protocol):
 
 
 class SpecialistError(RuntimeError):
-    """Raised when a specialist's response can't be parsed into items.
+    """Raised when a coaching specialist call fails.
+
+    Covers both failure modes: the API call itself failing (auth, rate
+    limit, network — an `anthropic.APIError`), and the API call succeeding
+    but returning a response that isn't valid JSON matching the expected
+    item schema. Both are handled identically by generate.py — one
+    specialist failing degrades that section of the report, not the whole
+    thing — so they share one exception type rather than two.
 
     Attributes:
         category: Which specialist failed.
-        raw_response: The raw text that failed to parse, for debugging.
+        raw_response: The raw text that failed to parse, or "" if the API
+            call itself failed before any response was received.
     """
 
     def __init__(self, category: str, raw_response: str, cause: Exception) -> None:
-        super().__init__(f"{category} specialist returned unparseable output: {cause}")
+        super().__init__(f"{category} specialist failed: {cause}")
         self.category = category
         self.raw_response = raw_response
 
@@ -82,16 +92,21 @@ def call_specialist(
         The parsed list of items for this specialist.
 
     Raises:
-        SpecialistError: If the response isn't valid JSON matching the
-            expected item schema.
+        SpecialistError: If the API call itself fails (auth, rate limit,
+            network — any `anthropic.APIError`), or if it succeeds but the
+            response isn't valid JSON matching the expected item schema.
     """
-    response = client.messages.create(
-        model=config.model,
-        max_tokens=config.max_tokens,
-        temperature=config.temperature,
-        system=system_prompt,
-        messages=[{"role": "user", "content": "Generate the coaching items now."}],
-    )
+    try:
+        response = client.messages.create(
+            model=config.model,
+            max_tokens=config.max_tokens,
+            temperature=config.temperature,
+            system=system_prompt,
+            messages=[{"role": "user", "content": "Generate the coaching items now."}],
+        )
+    except anthropic.APIError as exc:
+        raise SpecialistError(category, "", exc) from exc
+
     raw_text = response.content[0].text
 
     item_class = _ITEM_CLASSES[category]

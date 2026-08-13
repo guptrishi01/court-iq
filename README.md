@@ -91,6 +91,7 @@ court-iq/
 
 ## Version History
 
+- **1.0.1** (2026-08-13) — Hardening pass: uncaught AI-specialist API failures (auth/rate-limit/network) now degrade gracefully instead of crashing report generation, `reports/` gained a `ReportConfig` default output location, and `logging_config.py` gives every module's logger somewhere to actually go. 115 tests, 100% statement coverage.
 - **1.0.0** (2026-08-12) — Initial architecture: SwingVision import pipeline (staged-JSON review gate), derived-stat aggregation, AI coaching engine (Claude Sonnet 5, 3 parallel specialists), and static HTML report generation with hand-rolled SVG charts. 105 tests, 100% statement coverage.
 
 ## License

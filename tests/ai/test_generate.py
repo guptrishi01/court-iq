@@ -45,3 +45,18 @@ def test_generate_all_does_not_fail_the_whole_report_when_one_specialist_fails(
     assert drills == []
     assert len(fitness) == 1
     assert any("drill" in record.message for record in caplog.records)
+
+
+def test_generate_all_survives_a_real_api_failure_on_one_specialist(sample_match_stats, caplog):
+    # Distinct from the malformed-JSON case above: here the API call itself
+    # raises (auth/rate-limit/network), which used to propagate uncaught
+    # and kill generate_all() entirely instead of degrading gracefully.
+    client = FakeAnthropicClient(api_error_for={"fitness"})
+    context = build_context(sample_match_stats)
+
+    with caplog.at_level(logging.ERROR):
+        strategy, drills, fitness = generate_all(client, AICoachConfig(), context)
+
+    assert len(strategy) == 1
+    assert len(drills) == 1
+    assert fitness == []

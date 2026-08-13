@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ai.records import CoachingItem, CoachingReport, DrillItem, FitnessItem, SupportingStat
+from reports.config import ReportConfig
 from reports.render import (
     render_history_report,
     render_history_report_to_file,
@@ -97,6 +98,17 @@ def test_render_match_report_to_file_writes_the_html(tmp_path: Path, sample_matc
     assert "Alex" in output_path.read_text(encoding="utf-8")
 
 
+def test_render_match_report_to_file_uses_config_output_dir_by_default(
+    tmp_path: Path, sample_match_stats
+):
+    config = ReportConfig(output_dir=tmp_path / "generated")
+
+    written = render_match_report_to_file(sample_match_stats, config=config)
+
+    assert written == tmp_path / "generated" / "1.html"
+    assert written.exists()
+
+
 def test_render_history_report_includes_trend_charts_and_win_loss_strip():
     matches = [
         make_match_stats(match_id=1, date="2026-07-01", result="W"),
@@ -123,4 +135,12 @@ def test_render_history_report_to_file_writes_the_html(tmp_path: Path):
     written = render_history_report_to_file([make_match_stats()], output_path)
 
     assert written == output_path
-    assert output_path.exists()
+
+
+def test_render_history_report_to_file_uses_config_output_dir_by_default(tmp_path: Path):
+    config = ReportConfig(output_dir=tmp_path / "generated")
+
+    written = render_history_report_to_file([make_match_stats()], config=config)
+
+    assert written == tmp_path / "generated" / "history.html"
+    assert written.exists()

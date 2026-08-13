@@ -9,6 +9,8 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import anthropic
+import httpx
 import pytest
 
 from ai.config import AICoachConfig
@@ -69,6 +71,21 @@ class FakeMessage:
     content: list
 
 
+def _fake_api_error() -> anthropic.APIError:
+    """Builds a real anthropic.APIError, minimal but genuine.
+
+    Using the SDK's own exception class (rather than a lookalike) is what
+    makes the `except anthropic.APIError` in client.py actually exercised
+    by a test, not just assumed to work.
+
+    Returns:
+        An anthropic.APIConnectionError, the simplest APIError subclass to
+        construct (no real HTTP response needed).
+    """
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    return anthropic.APIConnectionError(message="simulated connection failure", request=request)
+
+
 @dataclass
 class FakeMessages:
     """Stands in for anthropic.Anthropic().messages.
@@ -77,17 +94,23 @@ class FakeMessages:
         response_for: category -> list of raw item dicts to return as JSON.
             Categories not present here get one default canned_item().
         raise_for: categories whose response should be unparseable JSON,
-            to exercise the SpecialistError path.
+            to exercise the SpecialistError "bad response" path.
+        api_error_for: categories whose call() should raise a real
+            anthropic.APIError, to exercise the SpecialistError "API call
+            itself failed" path.
         calls: every kwargs dict passed to create(), for assertions.
     """
 
     response_for: dict[str, list[dict]] = field(default_factory=dict)
     raise_for: set[str] = field(default_factory=set)
+    api_error_for: set[str] = field(default_factory=set)
     calls: list[dict] = field(default_factory=list)
 
     def create(self, **kwargs: object) -> FakeMessage:
         self.calls.append(kwargs)
         category = _category_from_system_prompt(kwargs["system"])
+        if category in self.api_error_for:
+            raise _fake_api_error()
         if category in self.raise_for:
             return FakeMessage(content=[FakeTextBlock(text="not valid json")])
         items = self.response_for.get(category, [canned_item(category)])
@@ -101,8 +124,9 @@ class FakeAnthropicClient:
         self,
         response_for: dict[str, list[dict]] | None = None,
         raise_for: set[str] | None = None,
+        api_error_for: set[str] | None = None,
     ) -> None:
-        self.messages = FakeMessages(response_for or {}, raise_for or set())
+        self.messages = FakeMessages(response_for or {}, raise_for or set(), api_error_for or set())
 
 
 @pytest.fixture
