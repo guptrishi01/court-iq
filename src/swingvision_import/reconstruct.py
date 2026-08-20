@@ -347,11 +347,16 @@ class ReconstructionResult:
             live play, so excluded rather than counted as a real point;
             distinct from skipped_points because these aren't a data gap,
             they're correctly-tracked non-match activity.
+        points: The reconstructed points themselves, pre-boundary-
+            assignment (still carrying their original match-wide
+            point_number) — kept here so build_shot_pattern_summary can be
+            called against them without re-deriving anything.
     """
 
     sets: list[SetRecord]
     skipped_points: list[int]
     excluded_points: list[int]
+    points: list[ReconstructedPoint]
 
 
 def _has_rally_shot(shots: list[RawShotRow]) -> bool:
@@ -414,4 +419,52 @@ def reconstruct_all(
         )
 
     sets = assign_game_set_boundaries(points, ad_scoring=ad_scoring)
-    return ReconstructionResult(sets=sets, skipped_points=skipped, excluded_points=excluded)
+    return ReconstructionResult(
+        sets=sets, skipped_points=skipped, excluded_points=excluded, points=points
+    )
+
+
+_SHORT_RALLY_MAX_SHOTS = 4
+
+
+def build_shot_pattern_summary(
+    points: list[ReconstructedPoint], shots_by_point: dict[int, list[RawShotRow]]
+) -> dict[str, float] | None:
+    """Aggregates rally-length patterns for the AI coach's optional context.
+
+    Rally-length only for now — SwingVision's Speed (MPH) column exists in
+    the real Shots sheet but isn't parsed by raw.py/RawShotRow yet, so a
+    speed-based metric is out of scope for this pass rather than silently
+    assumed.
+
+    Args:
+        points: Reconstructed points (already excludes gaps and non-match
+            points — see reconstruct_all).
+        shots_by_point: point_number -> its shots, from group_shots_by_point.
+
+    Returns:
+        None if there are no points to summarize; otherwise avg_rally_length
+        (mean shot count per point) and rally_win_rate_short/
+        rally_win_rate_long (win rate split at _SHORT_RALLY_MAX_SHOTS shots).
+    """
+    if not points:
+        return None
+
+    rally_lengths = []
+    short_won = short_total = 0
+    long_won = long_total = 0
+    for point in points:
+        shot_count = len(shots_by_point.get(point.point_number, []))
+        rally_lengths.append(shot_count)
+        if shot_count <= _SHORT_RALLY_MAX_SHOTS:
+            short_total += 1
+            short_won += int(point.point_won)
+        else:
+            long_total += 1
+            long_won += int(point.point_won)
+
+    return {
+        "avg_rally_length": round(sum(rally_lengths) / len(rally_lengths), 2),
+        "rally_win_rate_short": round(short_won / short_total * 100, 1) if short_total else 0.0,
+        "rally_win_rate_long": round(long_won / long_total * 100, 1) if long_total else 0.0,
+    }

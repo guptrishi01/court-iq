@@ -21,7 +21,9 @@ class CoachContext:
         result: "W" or "L".
         stats: A flat dict of stat name -> value, using the same
             abbreviations as docs/stat-definitions.md so prompts can
-            reference them directly.
+            reference them directly. Includes shot_pattern_summary's keys
+            (avg_rally_length, rally_win_rate_short/long) when one was
+            available for this match — see build_context.
         pros: Self-reported "what went well."
         cons: Self-reported "what needs work."
         energy_rating: 1-5, if provided.
@@ -46,11 +48,19 @@ class CoachContext:
         return asdict(self)
 
 
-def build_context(match_stats: MatchStats) -> CoachContext:
+def build_context(
+    match_stats: MatchStats, shot_pattern_summary: dict[str, float] | None = None
+) -> CoachContext:
     """Builds the deterministic coaching context from a match's derived stats.
 
     Args:
         match_stats: The full derived-stats bundle for one match.
+        shot_pattern_summary: Optional rally-length aggregates from
+            swingvision_import.reconstruct.build_shot_pattern_summary,
+            looked up by ai/pipeline.py from the match's original staged
+            JSON if it's still present. Folded into `stats` alongside the
+            SQL-derived numbers when given; omitted entirely otherwise —
+            this is additive-only, never required.
 
     Returns:
         The fixed context object every specialist call receives, unchanged.
@@ -71,6 +81,8 @@ def build_context(match_stats: MatchStats) -> CoachContext:
         "NS%": match_stats.net.net_success_pct,
         "DC%": match_stats.clutch.deuce_conversion_pct,
     }
+    if shot_pattern_summary:
+        stats.update(shot_pattern_summary)
     return CoachContext(
         match_id=match_stats.match_id,
         opponent=match_stats.opponent,

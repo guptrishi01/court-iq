@@ -110,12 +110,17 @@ class SwingVisionImportPipeline:
             # reconstruct_all logs its own skipped/excluded warnings; no need
             # to re-log here.
             reconstruction = reconstruct.reconstruct_all(raw.shots, raw.settings.host_name)
+            shots_by_point = reconstruct.group_shots_by_point(raw.shots)
+            shot_pattern_summary = reconstruct.build_shot_pattern_summary(
+                reconstruction.points, shots_by_point
+            )
             record = MatchRecord(
                 date=date,
                 opponent=opponent,
                 result=result,
                 source_file=str(xlsx_path),
                 sets=reconstruction.sets,
+                shot_pattern_summary=shot_pattern_summary,
                 **match_overrides,
             )
 

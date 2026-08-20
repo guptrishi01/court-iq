@@ -13,7 +13,9 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from stats.models import MatchStats
 from stats.queries import match_stats
+from swingvision_import.review import find_pending_path, load_pending
 
 from .client import AnthropicClientLike
 from .config import AICoachConfig
@@ -22,6 +24,34 @@ from .generate import generate_all
 from .records import CoachingReport
 
 logger = logging.getLogger(__name__)
+
+
+def _lookup_shot_pattern_summary(
+    stats: MatchStats, pending_dir: Path
+) -> dict[str, float] | None:
+    """Best-effort lookup of a match's shot-pattern summary from its
+    original staged JSON, by the date/opponent already on the match row.
+
+    This is additive-only: a missing pending file (deleted after finalize,
+    or never existed for a direct-parse match with no reconstruction) or
+    any read/parse problem just means no enrichment - never fails coaching
+    generation over an optional context field.
+
+    Args:
+        stats: The match's derived-stats bundle (has date/opponent).
+        pending_dir: Directory pending JSON files are staged into.
+
+    Returns:
+        The summary dict, or None if unavailable for any reason.
+    """
+    path = find_pending_path(stats.date, stats.opponent, pending_dir)
+    if path is None:
+        return None
+    try:
+        return load_pending(path).shot_pattern_summary
+    except (OSError, ValueError, TypeError) as exc:
+        logger.info("Couldn't load shot_pattern_summary from %s: %s", path, exc)
+        return None
 
 
 class AICoachPipeline:
@@ -71,7 +101,8 @@ class AICoachPipeline:
             return CoachingReport.from_dict(json.loads(report_path.read_text(encoding="utf-8")))
 
         stats = match_stats(connection, match_id)
-        context = build_context(stats)
+        shot_pattern_summary = _lookup_shot_pattern_summary(stats, self.config.pending_dir)
+        context = build_context(stats, shot_pattern_summary)
         strategy, drills, fitness = generate_all(client, self.config, context)
 
         report = CoachingReport(

@@ -35,3 +35,21 @@ def test_to_dict_is_json_serializable(sample_match_stats):
     context = build_context(sample_match_stats)
     # Must not raise.
     json.dumps(context.to_dict())
+
+
+def test_build_context_folds_in_shot_pattern_summary_when_given(sample_match_stats):
+    summary = {"avg_rally_length": 4.75, "rally_win_rate_short": 50.0, "rally_win_rate_long": 50.0}
+
+    context = build_context(sample_match_stats, summary)
+
+    assert context.stats["avg_rally_length"] == 4.75
+    assert context.stats["rally_win_rate_short"] == 50.0
+    assert context.stats["rally_win_rate_long"] == 50.0
+    # Doesn't crowd out the existing SQL-derived stats.
+    assert context.stats["FS%"] == sample_match_stats.serving.first_serve_pct
+
+
+def test_build_context_omits_shot_pattern_keys_when_none(sample_match_stats):
+    context = build_context(sample_match_stats, shot_pattern_summary=None)
+
+    assert "avg_rally_length" not in context.stats

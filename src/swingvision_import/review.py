@@ -50,6 +50,28 @@ def save_pending(record: MatchRecord, pending_dir: Path) -> Path:
     return path
 
 
+def find_pending_path(date: str, opponent: str, pending_dir: Path) -> Path | None:
+    """Locates a match's pending JSON by the same naming save_pending uses.
+
+    Used by ai/pipeline.py to look up a match's original staged data (for
+    its optional shot_pattern_summary) using only the date/opponent already
+    stored in the `match` table — no schema change needed to link SQL rows
+    back to their staging JSON.
+
+    Args:
+        date: The match's date, as stored on the `match` row.
+        opponent: The match's opponent, as stored on the `match` row.
+        pending_dir: Directory pending JSON files are saved into.
+
+    Returns:
+        The path, if a file with that name still exists (it may have been
+        deleted after finalize(), or never existed for a direct-parse
+        match with a different provenance); None otherwise.
+    """
+    path = pending_dir / f"{date}_{slugify_filename(opponent)}.json"
+    return path if path.exists() else None
+
+
 def load_pending(path: Path) -> MatchRecord:
     """Loads a staged MatchRecord back from its JSON file.
 

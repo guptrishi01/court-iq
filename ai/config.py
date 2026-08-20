@@ -24,6 +24,10 @@ class AICoachConfig:
             (energy/mental rating + cons, vs. the full point-outcome stats).
         reports_dir: Directory generated CoachingReport JSON files are
             written to (gitignored — personal data, not code).
+        pending_dir: Directory swingvision_import stages pending-review
+            match JSON into — mirrors ImportConfig.pending_dir's default.
+            Used to best-effort look up a match's shot_pattern_summary by
+            date/opponent; harmless if nothing's found there.
     """
 
     model: str = DEFAULT_MODEL
@@ -32,3 +36,4 @@ class AICoachConfig:
     drill_item_bounds: tuple[int, int] = (2, 4)
     fitness_item_bounds: tuple[int, int] = (1, 3)
     reports_dir: Path = _REPO_ROOT / "ai" / "reports"
+    pending_dir: Path = _REPO_ROOT / "src" / "swingvision_import" / "pending"

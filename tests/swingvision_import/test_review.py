@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from swingvision_import.records import MatchRecord, PointRecord, SetRecord
-from swingvision_import.review import load_pending, save_pending, unresolved_flags
+from swingvision_import.review import (
+    find_pending_path,
+    load_pending,
+    save_pending,
+    unresolved_flags,
+)
 
 
 def _sample_record(needs_review: bool) -> MatchRecord:
@@ -124,3 +129,16 @@ def test_save_pending_twice_overwrites_the_same_file_rather_than_duplicating(tmp
     assert first_path == second_path
     assert list(tmp_path.glob("*.json")) == [first_path]
     assert load_pending(second_path).pros == "Updated after re-review"
+
+
+def test_find_pending_path_locates_a_previously_saved_record(tmp_path: Path):
+    record = _sample_record(needs_review=False)
+    saved_path = save_pending(record, tmp_path)
+
+    found = find_pending_path(record.date, record.opponent, tmp_path)
+
+    assert found == saved_path
+
+
+def test_find_pending_path_returns_none_when_nothing_was_ever_staged(tmp_path: Path):
+    assert find_pending_path("2026-08-06", "Alex", tmp_path) is None

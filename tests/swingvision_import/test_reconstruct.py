@@ -4,6 +4,7 @@ from swingvision_import.raw import RawShotRow
 from swingvision_import.reconstruct import (
     ReconstructedPoint,
     assign_game_set_boundaries,
+    build_shot_pattern_summary,
     group_shots_by_point,
     reconstruct_all,
     reconstruct_point,
@@ -270,3 +271,52 @@ def test_reconstruct_all_excludes_points_with_no_rally_shot_but_does_not_skip_th
     assert result.skipped_points == []
     total_points = sum(len(s.points) for s in result.sets)
     assert total_points == 2
+
+
+def _reconstructed_point(point_number: int, point_won: bool) -> ReconstructedPoint:
+    return ReconstructedPoint(
+        point_number=point_number,
+        is_serving=True,
+        point_won=point_won,
+        first_serve_in=True,
+        second_serve_in=None,
+        point_end_type="winner" if point_won else "unforced_error",
+        net_approach=False,
+    )
+
+
+def test_build_shot_pattern_summary_returns_none_for_no_points():
+    assert build_shot_pattern_summary([], {}) is None
+
+
+def test_build_shot_pattern_summary_computes_rally_length_and_win_rate_split():
+    points = [
+        _reconstructed_point(1, point_won=True),  # 2 shots -> short, won
+        _reconstructed_point(2, point_won=False),  # 3 shots -> short, lost
+        _reconstructed_point(3, point_won=True),  # 6 shots -> long, won
+        _reconstructed_point(4, point_won=False),  # 8 shots -> long, lost
+    ]
+    shots_by_point = {
+        1: [_shot(1, i, HOST, "in_play", "Forehand", "In") for i in range(2)],
+        2: [_shot(2, i, HOST, "in_play", "Forehand", "In") for i in range(3)],
+        3: [_shot(3, i, HOST, "in_play", "Forehand", "In") for i in range(6)],
+        4: [_shot(4, i, HOST, "in_play", "Forehand", "In") for i in range(8)],
+    }
+
+    summary = build_shot_pattern_summary(points, shots_by_point)
+
+    assert summary == {
+        "avg_rally_length": 4.75,
+        "rally_win_rate_short": 50.0,
+        "rally_win_rate_long": 50.0,
+    }
+
+
+def test_build_shot_pattern_summary_treats_a_missing_shot_lookup_as_zero_length():
+    points = [_reconstructed_point(1, point_won=True)]
+
+    summary = build_shot_pattern_summary(points, shots_by_point={})
+
+    assert summary["avg_rally_length"] == 0.0
+    assert summary["rally_win_rate_short"] == 100.0
+    assert summary["rally_win_rate_long"] == 0.0
