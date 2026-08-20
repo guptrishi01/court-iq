@@ -18,12 +18,13 @@ from pathlib import Path
 
 from ai.client import AnthropicClientLike
 
-from . import db, load, quality_check, reconstruct, review, review_assist
+from . import db, load, quality_check, reconstruct, review, review_assist, review_resolve
 from .config import ImportConfig
 from .parse import SwingVisionParser
-from .raw import RawSetRow, RawSettings
+from .raw import RawSetRow, RawSettings, RawShotRow
 from .records import MatchRecord
 from .review_assist import SuggestionConfig
+from .review_resolve import ResolutionConfig
 from .transform import transform
 
 logger = logging.getLogger(__name__)
@@ -283,6 +284,30 @@ class SwingVisionImportPipeline:
         notes.extend(quality_check.check_tracked_identity(settings, tracked_identity))
         return notes
 
+    def _shots_by_point(self, record: MatchRecord) -> dict[int, list[RawShotRow]] | None:
+        """Re-derives point_number -> shots for a staged record.
+
+        Re-merges multi-part files the same way ingest_multi_part() did, so
+        source_point_number (assigned from the merged sequence at ingest
+        time) still resolves correctly.
+
+        Args:
+            record: The staged match record.
+
+        Returns:
+            The lookup, or None if the record has no source file(s) at all
+            to re-parse (distinct from a source that parses to zero shots).
+        """
+        if record.source_files:
+            raw_exports = [self._parser.parse(Path(p)) for p in record.source_files]
+            return reconstruct.group_shots_by_point(
+                reconstruct.merge_shots([raw.shots for raw in raw_exports])
+            )
+        if record.source_file is not None:
+            raw = self._parser.parse(Path(record.source_file))
+            return reconstruct.group_shots_by_point(raw.shots)
+        return None
+
     def suggest(
         self,
         client: AnthropicClientLike,
@@ -318,18 +343,8 @@ class SwingVisionImportPipeline:
                 source_files to re-parse.
         """
         record = review.load_pending(json_path)
-        if record.source_files:
-            # Same merge as ingest_multi_part(), so source_point_number
-            # (assigned from the merged sequence at ingest time) maps
-            # correctly into this re-merged shots_by_point.
-            raw_exports = [self._parser.parse(Path(p)) for p in record.source_files]
-            shots_by_point = reconstruct.group_shots_by_point(
-                reconstruct.merge_shots([raw.shots for raw in raw_exports])
-            )
-        elif record.source_file is not None:
-            raw = self._parser.parse(Path(record.source_file))
-            shots_by_point = reconstruct.group_shots_by_point(raw.shots)
-        else:
+        shots_by_point = self._shots_by_point(record)
+        if shots_by_point is None:
             raise ValueError(f"{json_path}: record has no source_file(s) to re-parse.")
 
         suggestion_config = suggestion_config or SuggestionConfig()
@@ -358,6 +373,111 @@ class SwingVisionImportPipeline:
 
         review.save_pending(record, self.config.pending_dir)
         logger.info("Generated %d suggestion(s) for %s", suggested_count, json_path)
+        return record
+
+    def resolve(
+        self,
+        client: AnthropicClientLike,
+        json_path: Path,
+        *,
+        resolution_config: ResolutionConfig | None = None,
+    ) -> MatchRecord:
+        """Parses every flagged point's human review_answer into resolved_* fields.
+
+        Opt-in and separate from ingest()/suggest()/finalize() — spends
+        real API money, so it never runs automatically. Run this after
+        hand-editing review_answer onto the points you've actually
+        reviewed (any point, not just reconstructed ones — a direct-parse
+        point can carry a review_answer too, just without raw shot context
+        to enrich it). Never clears needs_review or touches the real
+        point_end_type/point_won/net_approach fields — apply_resolutions()
+        is the only thing that does that, as one more explicit human
+        checkpoint.
+
+        Args:
+            client: An anthropic.Anthropic-shaped client (injected so
+                tests never hit the real API or spend real money).
+            json_path: Path to a pending JSON file previously written by
+                ingest().
+            resolution_config: Model/token settings. Defaults to
+                ResolutionConfig() if not given.
+
+        Returns:
+            The record with resolved_point_end_type/resolved_point_won/
+            resolved_net_approach/resolution_reasoning filled in for every
+            point that had a review_answer and parsed successfully. Also
+            re-saved to the same pending JSON path.
+        """
+        record = review.load_pending(json_path)
+        shots_by_point = self._shots_by_point(record) or {}
+        resolution_config = resolution_config or ResolutionConfig()
+
+        resolved_count = 0
+        for set_record in record.sets:
+            for point in set_record.points:
+                if not point.review_answer:
+                    continue
+                shot_context = (
+                    shots_by_point.get(point.source_point_number, [])
+                    if point.source_point_number is not None
+                    else []
+                )
+                try:
+                    resolution = review_resolve.resolve_point_answer(
+                        client, resolution_config, point, shot_context
+                    )
+                except review_resolve.ResolutionError:
+                    logger.exception(
+                        "Failed to parse review_answer for set %d game %d point %d",
+                        set_record.set_number,
+                        point.game_number,
+                        point.point_number,
+                    )
+                    continue
+                point.resolved_point_end_type = resolution.point_end_type
+                point.resolved_point_won = resolution.point_won
+                point.resolved_net_approach = resolution.net_approach
+                point.resolution_reasoning = resolution.reasoning
+                resolved_count += 1
+
+        review.save_pending(record, self.config.pending_dir)
+        logger.info("Parsed %d review answer(s) for %s", resolved_count, json_path)
+        return record
+
+    def apply_resolutions(self, json_path: Path) -> MatchRecord:
+        """Applies every point's parsed resolution and clears needs_review for it.
+
+        The explicit human checkpoint resolve() defers to: only points
+        with a resolved_point_end_type (i.e. resolve() successfully parsed
+        their review_answer) are touched. A point whose review_answer
+        failed to parse, or was never written, is untouched and stays
+        needs_review=True — finalize() will keep refusing the match until
+        it's addressed some other way (a corrected review_answer + another
+        resolve() pass, or a direct hand-edit).
+
+        Args:
+            json_path: Path to a pending JSON file, after resolve() has run.
+
+        Returns:
+            The record with resolved fields applied and needs_review
+            cleared for every point that had one. Also re-saved to the
+            same pending JSON path.
+        """
+        record = review.load_pending(json_path)
+        applied_count = 0
+        for set_record in record.sets:
+            for point in set_record.points:
+                if point.resolved_point_end_type is None:
+                    continue
+                point.point_end_type = point.resolved_point_end_type
+                point.point_won = bool(point.resolved_point_won)
+                if point.resolved_net_approach is not None:
+                    point.net_approach = point.resolved_net_approach
+                point.needs_review = False
+                applied_count += 1
+
+        review.save_pending(record, self.config.pending_dir)
+        logger.info("Applied %d resolution(s) for %s", applied_count, json_path)
         return record
 
     def finalize(self, json_path: Path) -> int:

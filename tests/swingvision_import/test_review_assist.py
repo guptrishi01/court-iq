@@ -171,3 +171,15 @@ def test_suggest_point_resolution_raises_when_no_text_block_exists():
         suggest_point_resolution(client, SuggestionConfig(), _point(), _shots())
 
     assert exc_info.value.raw_response == ""
+
+
+def test_suggest_point_resolution_strips_a_markdown_fence_before_parsing():
+    # Confirmed against the live API, not hypothetical: a real response
+    # came back wrapped in ```json ... ``` despite the prompt explicitly
+    # saying not to.
+    valid = json.dumps({"point_end_type": "forced_error", "reasoning": "x", "confidence": "high"})
+    client = _FakeClient(response_text=f"```json\n{valid}\n```")
+
+    suggestion = suggest_point_resolution(client, SuggestionConfig(), _point(), _shots())
+
+    assert suggestion.point_end_type == "forced_error"

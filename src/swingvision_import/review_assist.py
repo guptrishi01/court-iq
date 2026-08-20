@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import anthropic
 
-from ai.client import AnthropicClientLike, extract_text
+from ai.client import AnthropicClientLike, extract_text, strip_markdown_fence
 
 from .raw import RawShotRow
 from .records import PointRecord
@@ -167,7 +167,7 @@ def suggest_point_resolution(
     raw_text = ""
     try:
         raw_text = extract_text(response)
-        data = json.loads(raw_text)
+        data = json.loads(strip_markdown_fence(raw_text))
         point_end_type = data["point_end_type"]
         if point_end_type not in _VALID_END_TYPES:
             raise ValueError(f"not a valid point_end_type: {point_end_type!r}")

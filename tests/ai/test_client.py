@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from ai.client import SpecialistError, call_specialist
+from ai.client import SpecialistError, call_specialist, strip_markdown_fence
 from ai.config import AICoachConfig
 from ai.records import DrillItem, FitnessItem
 from tests.ai.conftest import (
@@ -134,3 +134,47 @@ def test_call_specialist_wraps_a_real_api_failure_as_specialist_error():
     assert exc_info.value.category == "strategy"
     assert exc_info.value.raw_response == ""
     assert "simulated connection failure" in str(exc_info.value)
+
+
+class _FencedMessages:
+    """Stands in for a real (confirmed, not hypothetical) Claude Sonnet 5
+    response that wraps its JSON in a markdown code fence despite the
+    prompt explicitly saying not to."""
+
+    def create(self, **kwargs):
+        payload = json.dumps([canned_item("strategy")])
+        return FakeMessage(content=[FakeTextBlock(text=f"```json\n{payload}\n```")])
+
+
+class _FencedClient:
+    def __init__(self):
+        self.messages = _FencedMessages()
+
+
+def test_call_specialist_strips_a_markdown_fence_before_parsing():
+    items = call_specialist(
+        _FencedClient(), AICoachConfig(), "strategy", "You are a strategy analyst."
+    )
+
+    assert len(items) == 1
+    assert items[0].category == "strategy"
+
+
+def test_strip_markdown_fence_removes_a_fence_with_a_language_tag():
+    fenced = '```json\n{"a": 1}\n```'
+    assert strip_markdown_fence(fenced) == '{"a": 1}'
+
+
+def test_strip_markdown_fence_removes_a_bare_fence():
+    fenced = '```\n{"a": 1}\n```'
+    assert strip_markdown_fence(fenced) == '{"a": 1}'
+
+
+def test_strip_markdown_fence_leaves_unfenced_text_unchanged():
+    assert strip_markdown_fence('{"a": 1}') == '{"a": 1}'
+
+
+def test_strip_markdown_fence_handles_a_fence_with_no_closing_line():
+    # Malformed/truncated, but shouldn't crash - falls back to dropping
+    # just the opening line.
+    assert strip_markdown_fence('```json\n{"a": 1}').strip() == '{"a": 1}'

@@ -466,3 +466,165 @@ def test_suggest_re_merges_multi_part_files_using_source_point_number(tmp_path, 
     all_points = [p for s in record.sets for p in s.points]
     assert all(p.ai_suggested_point_end_type == "forced_error" for p in all_points)
     assert len(client.messages.calls) == len(all_points)
+
+
+class _FakeResolutionMessages:
+    def __init__(self):
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        payload = json.dumps(
+            {
+                "point_end_type": "winner",
+                "point_won": True,
+                "net_approach": False,
+                "reasoning": "The human said it was a clean winner.",
+            }
+        )
+        return FakeMessage(content=[FakeTextBlock(text=payload)])
+
+
+class _FakeResolutionClient:
+    def __init__(self):
+        self.messages = _FakeResolutionMessages()
+
+
+class _FlakyResolutionMessages:
+    """Fails for the first point, succeeds for the rest."""
+
+    def __init__(self):
+        self.calls = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if len(self.calls) == 1:
+            return FakeMessage(content=[FakeTextBlock(text="not valid json")])
+        payload = json.dumps(
+            {"point_end_type": "winner", "point_won": True, "net_approach": False, "reasoning": "x"}
+        )
+        return FakeMessage(content=[FakeTextBlock(text=payload)])
+
+
+class _FlakyResolutionClient:
+    def __init__(self):
+        self.messages = _FlakyResolutionMessages()
+
+
+def test_resolve_parses_review_answers_without_touching_needs_review(
+    synthetic_non_pro_xlsx, import_config
+):
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest(
+        synthetic_non_pro_xlsx, date="2026-08-06", opponent="Alex", result="W"
+    )
+    record = load_pending(json_path)
+    record.sets[0].points[0].review_answer = "She was way out of position - clean winner."
+    save_pending(record, import_config.pending_dir)
+    client = _FakeResolutionClient()
+
+    resolved = pipeline.resolve(client, json_path)
+
+    answered_point = resolved.sets[0].points[0]
+    assert answered_point.resolved_point_end_type == "winner"
+    assert answered_point.resolved_point_won is True
+    assert answered_point.resolution_reasoning == "The human said it was a clean winner."
+    assert answered_point.needs_review is True  # never cleared by resolve()
+    assert answered_point.point_end_type != "winner"  # real field untouched
+
+    # The other point had no review_answer - left completely alone.
+    untouched_point = resolved.sets[0].points[1]
+    assert untouched_point.resolved_point_end_type is None
+    assert len(client.messages.calls) == 1
+
+
+def test_resolve_works_for_direct_parse_points_with_no_shot_context(
+    synthetic_xlsx, import_config
+):
+    # synthetic_xlsx takes the direct-parse path - its points have no
+    # source_point_number and no raw shots to enrich the prompt with, but
+    # resolve() should still work from the review_answer alone.
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest(synthetic_xlsx, date="2026-08-06", opponent="Alex", result="W")
+    record = load_pending(json_path)
+    flagged_point = next(p for s in record.sets for p in s.points if p.needs_review)
+    flagged_point.review_answer = "That was actually a forced error, she was pulled wide."
+    save_pending(record, import_config.pending_dir)
+    client = _FakeResolutionClient()
+
+    resolved = pipeline.resolve(client, json_path)
+
+    answered = next(p for s in resolved.sets for p in s.points if p.review_answer)
+    assert answered.resolved_point_end_type == "winner"
+    assert answered.source_point_number is None
+
+
+def test_resolve_continues_past_one_points_parse_failure(
+    synthetic_non_pro_xlsx, import_config, caplog
+):
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest(
+        synthetic_non_pro_xlsx, date="2026-08-06", opponent="Alex", result="W"
+    )
+    record = load_pending(json_path)
+    for point in record.sets[0].points:
+        point.review_answer = "Clean winner."
+    save_pending(record, import_config.pending_dir)
+    client = _FlakyResolutionClient()
+
+    with caplog.at_level(logging.ERROR):
+        resolved = pipeline.resolve(client, json_path)
+
+    all_points = [p for s in resolved.sets for p in s.points]
+    succeeded = [p for p in all_points if p.resolved_point_end_type == "winner"]
+    failed = [p for p in all_points if p.resolved_point_end_type is None]
+    assert len(succeeded) == 1
+    assert len(failed) == 1
+    assert any("Failed to parse review_answer" in r.message for r in caplog.records)
+
+
+def test_apply_resolutions_applies_fields_and_clears_needs_review(
+    synthetic_non_pro_xlsx, import_config
+):
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest(
+        synthetic_non_pro_xlsx, date="2026-08-06", opponent="Alex", result="W"
+    )
+    record = load_pending(json_path)
+    for point in record.sets[0].points:
+        point.review_answer = "Clean winner, no net play."
+    save_pending(record, import_config.pending_dir)
+    pipeline.resolve(_FakeResolutionClient(), json_path)
+
+    applied = pipeline.apply_resolutions(json_path)
+
+    all_points = [p for s in applied.sets for p in s.points]
+    assert all(p.point_end_type == "winner" for p in all_points)
+    assert all(p.point_won is True for p in all_points)
+    assert all(p.needs_review is False for p in all_points)
+
+    # Fully resolved now - finalize() should succeed instead of raising.
+    match_id = pipeline.finalize(json_path)
+    assert match_id == 1
+
+
+def test_apply_resolutions_leaves_unresolved_points_untouched(
+    synthetic_non_pro_xlsx, import_config
+):
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest(
+        synthetic_non_pro_xlsx, date="2026-08-06", opponent="Alex", result="W"
+    )
+    record = load_pending(json_path)
+    record.sets[0].points[0].review_answer = "Clean winner."
+    save_pending(record, import_config.pending_dir)
+    pipeline.resolve(_FakeResolutionClient(), json_path)
+
+    applied = pipeline.apply_resolutions(json_path)
+
+    untouched = applied.sets[0].points[1]
+    assert untouched.needs_review is True
+    assert untouched.resolved_point_end_type is None
+
+    with pytest.raises(UnresolvedReviewError):
+        pipeline.finalize(json_path)

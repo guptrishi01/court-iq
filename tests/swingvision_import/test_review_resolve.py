@@ -1,0 +1,236 @@
+from __future__ import annotations
+
+import json
+
+import anthropic
+import httpx
+import pytest
+
+from swingvision_import.raw import RawShotRow
+from swingvision_import.records import PointRecord
+from swingvision_import.review_resolve import (
+    ResolutionConfig,
+    ResolutionError,
+    resolve_point_answer,
+)
+from tests.ai.conftest import FakeMessage, FakeTextBlock, FakeThinkingBlock
+
+
+class _FakeMessages:
+    def __init__(self, response_text: str | None = None, raise_error: Exception | None = None):
+        self.response_text = response_text
+        self.raise_error = raise_error
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        if self.raise_error:
+            raise self.raise_error
+        return FakeMessage(content=[FakeTextBlock(text=self.response_text)])
+
+
+class _FakeClient:
+    def __init__(self, response_text: str | None = None, raise_error: Exception | None = None):
+        self.messages = _FakeMessages(response_text, raise_error)
+
+
+class _ThinkingFirstClient:
+    def __init__(self, content: list):
+        self.messages = _ThinkingFirstMessages(content)
+
+
+class _ThinkingFirstMessages:
+    def __init__(self, content: list):
+        self.content = content
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return FakeMessage(content=self.content)
+
+
+def _point(
+    review_answer: str = "She was way out of position, that was a clean winner.",
+) -> PointRecord:
+    return PointRecord(
+        game_number=1,
+        point_number=1,
+        is_serving=True,
+        point_won=False,
+        point_end_type="unforced_error",
+        needs_review=True,
+        review_answer=review_answer,
+    )
+
+
+def _shots() -> list[RawShotRow]:
+    return [
+        RawShotRow(1, 1, "Rishi Gupta", "first_serve", "Serve", "In"),
+        RawShotRow(1, 2, "Opponent", "first_return", "Forehand", "In"),
+        RawShotRow(1, 3, "Rishi Gupta", "serve_plus_one", "Forehand", "In"),
+    ]
+
+
+def test_resolve_point_answer_parses_a_valid_response():
+    valid = json.dumps(
+        {
+            "point_end_type": "winner",
+            "point_won": True,
+            "net_approach": False,
+            "reasoning": "The human said it was a clean winner.",
+        }
+    )
+    client = _FakeClient(response_text=valid)
+
+    resolution = resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+    assert resolution.point_end_type == "winner"
+    assert resolution.point_won is True
+    assert resolution.net_approach is False
+    assert "clean winner" in resolution.reasoning
+
+
+def test_resolve_point_answer_includes_the_human_answer_in_the_prompt():
+    valid = json.dumps(
+        {"point_end_type": "winner", "point_won": True, "net_approach": False, "reasoning": "x"}
+    )
+    client = _FakeClient(response_text=valid)
+
+    resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+    system = client.messages.calls[0]["system"]
+    assert "way out of position" in system
+
+
+def test_resolve_point_answer_works_without_any_shot_context():
+    valid = json.dumps(
+        {
+            "point_end_type": "forced_error",
+            "point_won": False,
+            "net_approach": False,
+            "reasoning": "x",
+        }
+    )
+    client = _FakeClient(response_text=valid)
+
+    resolution = resolve_point_answer(client, ResolutionConfig(), _point(), shot_context=[])
+
+    assert resolution.point_end_type == "forced_error"
+
+
+def test_resolve_point_answer_raises_on_api_failure():
+    request = httpx.Request("POST", "https://api.anthropic.com/v1/messages")
+    error = anthropic.APIConnectionError(message="boom", request=request)
+    client = _FakeClient(raise_error=error)
+
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+    assert exc_info.value.raw_response == ""
+    assert "boom" in str(exc_info.value)
+
+
+def test_resolve_point_answer_raises_on_invalid_json():
+    client = _FakeClient(response_text="not json")
+
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+    assert exc_info.value.raw_response == "not json"
+
+
+def test_resolve_point_answer_raises_on_a_winning_end_type_with_point_won_false():
+    # Confirmed against the live API, not hypothetical: a real response
+    # once paired point_end_type="ace" with point_won=false, which
+    # violates data/schema.sql's CHECK constraint and would blow up
+    # finalize() far removed from this point if allowed through.
+    inconsistent = json.dumps(
+        {"point_end_type": "ace", "point_won": False, "net_approach": False, "reasoning": "x"}
+    )
+    client = _FakeClient(response_text=inconsistent)
+
+    with pytest.raises(ResolutionError, match="point_won=true"):
+        resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+
+def test_resolve_point_answer_raises_on_a_losing_end_type_with_point_won_true():
+    inconsistent = json.dumps(
+        {
+            "point_end_type": "unforced_error",
+            "point_won": True,
+            "net_approach": False,
+            "reasoning": "x",
+        }
+    )
+    client = _FakeClient(response_text=inconsistent)
+
+    with pytest.raises(ResolutionError, match="point_won=false"):
+        resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+
+def test_resolve_point_answer_raises_on_an_invalid_point_end_type():
+    invalid = json.dumps(
+        {"point_end_type": "let", "point_won": True, "net_approach": False, "reasoning": "x"}
+    )
+    client = _FakeClient(response_text=invalid)
+
+    with pytest.raises(ResolutionError):
+        resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+
+def test_resolve_point_answer_raises_on_missing_required_key():
+    incomplete = json.dumps({"point_end_type": "winner"})
+    client = _FakeClient(response_text=incomplete)
+
+    with pytest.raises(ResolutionError):
+        resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+
+def test_resolve_point_answer_passes_model_and_token_config_through():
+    valid = json.dumps(
+        {"point_end_type": "winner", "point_won": True, "net_approach": False, "reasoning": "x"}
+    )
+    client = _FakeClient(response_text=valid)
+    config = ResolutionConfig(model="claude-sonnet-5", max_tokens=256)
+
+    resolve_point_answer(client, config, _point(), _shots())
+
+    call = client.messages.calls[0]
+    assert call["model"] == "claude-sonnet-5"
+    assert call["max_tokens"] == 256
+    assert "temperature" not in call
+
+
+def test_resolve_point_answer_skips_a_leading_thinking_block_to_find_the_text():
+    valid = json.dumps(
+        {"point_end_type": "winner", "point_won": True, "net_approach": False, "reasoning": "x"}
+    )
+    client = _ThinkingFirstClient(
+        content=[FakeThinkingBlock(thinking="reasoning..."), FakeTextBlock(text=valid)]
+    )
+
+    resolution = resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+    assert resolution.point_end_type == "winner"
+
+
+def test_resolve_point_answer_raises_when_no_text_block_exists():
+    client = _ThinkingFirstClient(content=[FakeThinkingBlock(thinking="reasoning...")])
+
+    with pytest.raises(ResolutionError) as exc_info:
+        resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+    assert exc_info.value.raw_response == ""
+
+
+def test_resolve_point_answer_strips_a_markdown_fence_before_parsing():
+    # Confirmed against the live API, not hypothetical: this is the exact
+    # real failure that motivated adding strip_markdown_fence at all.
+    valid = json.dumps(
+        {"point_end_type": "ace", "point_won": True, "net_approach": False, "reasoning": "x"}
+    )
+    client = _FakeClient(response_text=f"```json\n{valid}\n```")
+
+    resolution = resolve_point_answer(client, ResolutionConfig(), _point(), _shots())
+
+    assert resolution.point_end_type == "ace"

@@ -64,6 +64,38 @@ def extract_text(response: _Message) -> str:
     raise ValueError("Response contained no text block")
 
 
+def strip_markdown_fence(text: str) -> str:
+    """Strips a leading/trailing markdown code fence, if present.
+
+    Claude Sonnet 5 sometimes wraps a JSON response in ```json ... ``` even
+    when the prompt explicitly says "no markdown fences" — confirmed
+    against the live API, not hypothetical: a real response came back as
+    '```json\\n{...}\\n```', which json.loads() rejects outright (fails on
+    the leading backtick). Stripping this first is what actually makes
+    "respond with ONLY a JSON object" reliable rather than aspirational.
+    Shared here since every JSON-parsing call site in this codebase
+    (call_specialist below, review_assist.py, review_resolve.py) hits the
+    same real failure mode.
+
+    Args:
+        text: The raw response text, possibly fenced.
+
+    Returns:
+        The text with a single leading/trailing ``` fence (and optional
+        language tag on the opening line) removed; the original text
+        unchanged if it wasn't fenced.
+    """
+    stripped = text.strip()
+    if not stripped.startswith("```"):
+        return stripped
+    lines = stripped.split("\n")
+    if len(lines) > 1 and lines[-1].strip() == "```":
+        lines = lines[1:-1]
+    else:
+        lines = lines[1:]
+    return "\n".join(lines).strip()
+
+
 class AnthropicClientLike(Protocol):
     """The minimal shape of anthropic.Anthropic this module depends on.
 
@@ -136,7 +168,7 @@ def call_specialist(
     raw_text = ""
     try:
         raw_text = extract_text(response)
-        raw_items = json.loads(raw_text)
+        raw_items = json.loads(strip_markdown_fence(raw_text))
         return [
             item_class(
                 category=category,

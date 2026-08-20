@@ -54,6 +54,29 @@ class PointRecord:
             None for a point that came from a direct Points-sheet parse.
             Lets pipeline.suggest() re-fetch this point's raw shots from
             the source export without re-deriving the mapping.
+        review_answer: The human reviewer's own free-text explanation of
+            what actually happened at this point (e.g. "she was way out of
+            position, that was a clean winner down the line"), written
+            during manual review instead of hand-editing point_end_type/
+            point_won directly. Distinct from ai_suggested_point_end_type:
+            that's Claude's independent guess from shot data alone, before
+            any human input; this is the human's own stated conclusion,
+            which pipeline.resolve() (review_resolve.py) parses into the
+            resolved_* fields below.
+        resolved_point_end_type: Claude's parse of review_answer into the
+            point table's canonical point_end_type vocabulary — a
+            translation of what the human already said, not an independent
+            judgment call. Set only after pipeline.resolve() runs.
+        resolved_point_won: Same, parsed for point_won.
+        resolved_net_approach: Same, parsed for net_approach.
+        resolution_reasoning: Claude's explanation of how it parsed
+            review_answer into the resolved_* fields, for the human to
+            sanity-check before applying.
+        needs_review still isn't cleared by any of the above — a separate,
+        explicit pipeline.apply_resolutions() call is what copies
+        resolved_* onto the real fields and clears needs_review, so a
+        parsing mistake here still gets one more human checkpoint before
+        it reaches finalize().
     """
 
     game_number: int
@@ -70,6 +93,11 @@ class PointRecord:
     ai_suggested_point_end_type: str | None = None
     ai_suggestion_reasoning: str | None = None
     source_point_number: int | None = None
+    review_answer: str | None = None
+    resolved_point_end_type: str | None = None
+    resolved_point_won: bool | None = None
+    resolved_net_approach: bool | None = None
+    resolution_reasoning: str | None = None
 
 
 @dataclass
