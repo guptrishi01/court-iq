@@ -18,9 +18,10 @@ from pathlib import Path
 
 from ai.client import AnthropicClientLike
 
-from . import db, load, reconstruct, review, review_assist
+from . import db, load, quality_check, reconstruct, review, review_assist
 from .config import ImportConfig
 from .parse import SwingVisionParser
+from .raw import RawMatchExport
 from .records import MatchRecord
 from .review_assist import SuggestionConfig
 from .transform import transform
@@ -53,6 +54,8 @@ class SwingVisionImportPipeline:
         date: str,
         opponent: str,
         result: str,
+        first_server_by_set: dict[int, str] | None = None,
+        tracked_identity: str | None = None,
         **match_overrides: object,
     ) -> Path:
         """Parses a SwingVision export and stages it for review.
@@ -62,6 +65,12 @@ class SwingVisionImportPipeline:
             date: ISO-format date of the match.
             opponent: Opponent's name.
             result: Match result, "W" or "L".
+            first_server_by_set: Optional set_number -> "me"/"opponent"
+                ground truth (from the intake UI) cross-checked against the
+                reconstructed serve order; see quality_check.check_serve_order.
+            tracked_identity: Optional self-reported name of "who I am in
+                this recording", cross-checked against the Settings sheet's
+                host name; see quality_check.check_tracked_identity.
             **match_overrides: Additional MatchRecord fields (e.g.
                 energy_rating, pros, cons, location).
 
@@ -75,6 +84,7 @@ class SwingVisionImportPipeline:
         """
         raw = self._parser.parse(xlsx_path)
 
+        reconstruction = None
         if raw.points:
             record = transform(
                 raw,
@@ -109,6 +119,10 @@ class SwingVisionImportPipeline:
                 **match_overrides,
             )
 
+        record.import_notes = self._build_import_notes(
+            record, raw, reconstruction, first_server_by_set, tracked_identity
+        )
+
         json_path = review.save_pending(record, self.config.pending_dir)
         flags = review.unresolved_flags(record)
         logger.info(
@@ -116,6 +130,48 @@ class SwingVisionImportPipeline:
             date, opponent, json_path, len(flags),
         )
         return json_path
+
+    def _build_import_notes(
+        self,
+        record: MatchRecord,
+        raw: RawMatchExport,
+        reconstruction: reconstruct.ReconstructionResult | None,
+        first_server_by_set: dict[int, str] | None,
+        tracked_identity: str | None,
+    ) -> list[str]:
+        """Assembles this ingest's informational data-quality notes.
+
+        Args:
+            record: The MatchRecord just built (direct-parse or reconstructed).
+            raw: The raw parsed export, for cross-checking against Sets/Settings.
+            reconstruction: The reconstruction result, if the Shots-based
+                fallback path was used; None on the direct-parse path (no
+                gap/exclusion counts to report).
+            first_server_by_set: See ingest().
+            tracked_identity: See ingest().
+
+        Returns:
+            Every note gathered — never blocks finalize(), just surfaces
+            things worth a human's attention.
+        """
+        notes = []
+        if reconstruction is not None:
+            if reconstruction.skipped_points:
+                notes.append(
+                    f"{len(reconstruction.skipped_points)} point(s) had no shot data "
+                    f"and were skipped (likely a recording gap): "
+                    f"{reconstruction.skipped_points}"
+                )
+            if reconstruction.excluded_points:
+                notes.append(
+                    f"{len(reconstruction.excluded_points)} point(s) were excluded as "
+                    f"non-match activity (e.g. a fed ball between points): "
+                    f"{reconstruction.excluded_points}"
+                )
+        notes.extend(quality_check.check_score_against_sets_sheet(record.sets, raw.sets))
+        notes.extend(quality_check.check_serve_order(record.sets, first_server_by_set))
+        notes.extend(quality_check.check_tracked_identity(raw.settings, tracked_identity))
+        return notes
 
     def suggest(
         self,

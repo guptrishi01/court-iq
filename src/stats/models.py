@@ -25,8 +25,9 @@ class PointRow:
         second_serve_in: Whether the second serve landed in, if known.
         point_won: Whether the tracked player won this point.
         point_end_type: Canonical point-outcome type (e.g. "ace").
-        net_approach: Whether the tracked player approached the net.
-        net_point_won: Whether a net approach won the point, if net_approach.
+        net_approach: Whether the tracked player approached the net. A net
+            approach's own success is always just point_won restricted to
+            net_approach points - there's no separate net_point_won field.
         is_tiebreak_game: Whether this point was played in a tiebreak game.
     """
 
@@ -39,7 +40,6 @@ class PointRow:
     point_won: bool
     point_end_type: str
     net_approach: bool
-    net_point_won: bool | None
     is_tiebreak_game: bool
 
 

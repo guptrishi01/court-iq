@@ -28,7 +28,6 @@ def _point(
     first_serve_in: bool | None = True,
     second_serve_in: bool | None = None,
     net_approach: bool = False,
-    net_point_won: bool | None = None,
 ) -> PointRow:
     return PointRow(
         set_number=1,
@@ -40,7 +39,6 @@ def _point(
         point_won=point_won,
         point_end_type=point_end_type,
         net_approach=net_approach,
-        net_point_won=net_point_won,
         is_tiebreak_game=False,
     )
 
@@ -88,8 +86,8 @@ def test_point_outcome_stats_ratio_is_zero_not_a_crash_when_no_unforced_errors()
 
 def test_net_stats_from_points_only_counts_flagged_approaches():
     points = [
-        _point(True, True, "winner", net_approach=True, net_point_won=True),
-        _point(True, False, "unforced_error", net_approach=True, net_point_won=False),
+        _point(True, True, "winner", net_approach=True),
+        _point(True, False, "unforced_error", net_approach=True),
         _point(True, True, "ace"),  # no net approach at all
     ]
 
@@ -107,7 +105,7 @@ def test_receiving_and_clutch_stats_use_game_score_reconstruction():
     points = [
         PointRow(
             1, 1, i + 1, False, True, None, won,
-            "winner" if won else "forced_error", False, None, False,
+            "winner" if won else "forced_error", False, False,
         )
         for i, won in enumerate([True, True, True, True])
     ]
@@ -142,7 +140,7 @@ def _seed_match(tmp_path: Path) -> tuple[sqlite3.Connection, int]:
                 games_lost=4,
                 points=[
                     PointRecord(1, 1, True, True, "ace"),
-                    PointRecord(1, 2, True, True, "double_fault", first_serve_in=False),
+                    PointRecord(1, 2, True, False, "double_fault", first_serve_in=False),
                     PointRecord(2, 1, False, True, "return_winner"),
                     PointRecord(2, 2, False, False, "unforced_error"),
                 ],
@@ -169,13 +167,13 @@ def test_match_stats_end_to_end_against_a_seeded_database(tmp_path: Path):
 def test_tiebreak_games_excluded_from_service_and_return_game_counts():
     points = [
         # A completed, non-tiebreak service game the player holds.
-        PointRow(1, 1, 1, True, True, None, True, "ace", False, None, False),
-        PointRow(1, 1, 2, True, True, None, True, "ace", False, None, False),
-        PointRow(1, 1, 3, True, True, None, True, "ace", False, None, False),
-        PointRow(1, 1, 4, True, True, None, True, "ace", False, None, False),
+        PointRow(1, 1, 1, True, True, None, True, "ace", False, False),
+        PointRow(1, 1, 2, True, True, None, True, "ace", False, False),
+        PointRow(1, 1, 3, True, True, None, True, "ace", False, False),
+        PointRow(1, 1, 4, True, True, None, True, "ace", False, False),
         # A tiebreak game — must not count as a service or return game at all.
-        PointRow(1, 2, 1, True, True, None, True, "ace", False, None, True),
-        PointRow(1, 2, 2, False, True, None, False, "unforced_error", False, None, True),
+        PointRow(1, 2, 1, True, True, None, True, "ace", False, True),
+        PointRow(1, 2, 2, False, True, None, False, "unforced_error", False, True),
     ]
 
     serving = serving_stats_from_points(points)

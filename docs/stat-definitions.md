@@ -48,7 +48,7 @@ How each statistic is defined and calculated from raw point data.
 | Stat | Abbreviation | Calculation |
 |---|---|---|
 | Net Approaches | NA | Count of points where `net_approach = TRUE` |
-| Net Points Won | NPW | Count of points where `net_approach = TRUE AND net_point_won = TRUE` |
+| Net Points Won | NPW | Count of points where `net_approach = TRUE AND point_won = TRUE` |
 | Net Success Rate | NS% | `NPW / NA * 100` |
 
 ## Clutch Stats

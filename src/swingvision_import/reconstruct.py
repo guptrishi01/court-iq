@@ -67,7 +67,6 @@ class ReconstructedPoint:
             _coarse_end_type.
         net_approach: Whether the tracked player hit a Volley/Overhead
             shot in this point.
-        net_point_won: point_won, if net_approach; otherwise None.
     """
 
     point_number: int
@@ -77,7 +76,6 @@ class ReconstructedPoint:
     second_serve_in: bool | None
     point_end_type: str
     net_approach: bool
-    net_point_won: bool | None
 
 
 def group_shots_by_point(shots: list[RawShotRow]) -> dict[int, list[RawShotRow]]:
@@ -189,7 +187,6 @@ def reconstruct_point(
         second_serve_in=second_serve_in,
         point_end_type=point_end_type,
         net_approach=net_approach,
-        net_point_won=point_won if net_approach else None,
     )
 
 
@@ -218,7 +215,6 @@ def _to_point_record(
         first_serve_in=point.first_serve_in,
         second_serve_in=point.second_serve_in,
         net_approach=point.net_approach,
-        net_point_won=point.net_point_won,
         is_tiebreak_game=is_tiebreak_game,
         needs_review=True,
         source_point_number=point.point_number,

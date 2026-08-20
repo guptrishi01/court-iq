@@ -27,9 +27,11 @@ class PointRecord:
         second_serve_in: Whether the second serve landed in, if known.
         net_approach: Whether the tracked player approached the net this
             point. SwingVision reports nothing for this; it stays False
-            until filled in by hand during review.
-        net_point_won: Whether a net approach won the point, if
-            net_approach is True.
+            until filled in by hand during review. A net approach's own
+            success is always just point_won restricted to net_approach
+            points — there's no separate net_point_won column; it was pure
+            redundant storage (always exactly point_won when net_approach
+            was true) and was dropped as a 3NF cleanup.
         is_tiebreak_game: Whether this point was played in a tiebreak game.
         needs_review: True when point_end_type came from one of
             SwingVision's less reliable AI-guessed categories (see
@@ -62,7 +64,6 @@ class PointRecord:
     first_serve_in: bool | None = None
     second_serve_in: bool | None = None
     net_approach: bool = False
-    net_point_won: bool | None = None
     is_tiebreak_game: bool = False
     needs_review: bool = False
     notes: str | None = None
@@ -113,6 +114,17 @@ class MatchRecord:
         source_file: Path to the SwingVision export this record was built
             from, for traceability during review.
         sets: All sets played in this match, in play order.
+        import_notes: Informational data-quality notes from quality_check.py
+            (e.g. a reconstructed set score that doesn't match the Sets
+            sheet's own summary, a serve-order mismatch against user-
+            supplied ground truth, gap/exclusion counts). Unlike
+            needs_review, these never block finalize() — they're for the
+            reviewer's awareness, not a per-point confirmation gate.
+        shot_pattern_summary: Aggregate shot-sequence stats (e.g. average
+            rally length) computed once at ingest time from the raw Shots
+            data, for the AI coach to optionally cite. None for a
+            direct-parse match (no raw shots involved) or when there was
+            nothing to summarize.
     """
 
     date: str
@@ -127,6 +139,8 @@ class MatchRecord:
     notes: str | None = None
     source_file: str | None = None
     sets: list[SetRecord] = field(default_factory=list)
+    import_notes: list[str] = field(default_factory=list)
+    shot_pattern_summary: dict[str, float] | None = None
 
     def to_dict(self) -> dict:
         """Converts this record to a plain, JSON-serializable dict.

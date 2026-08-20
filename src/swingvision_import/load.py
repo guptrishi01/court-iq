@@ -124,9 +124,9 @@ def finalize_and_load(connection: sqlite3.Connection, record: MatchRecord) -> in
                     """
                     INSERT INTO point (set_id, game_number, point_number, is_serving,
                                         first_serve_in, second_serve_in, point_won,
-                                        point_end_type, net_approach, net_point_won,
+                                        point_end_type, net_approach,
                                         is_tiebreak_game, notes)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     (
                         set_id,
@@ -138,7 +138,6 @@ def finalize_and_load(connection: sqlite3.Connection, record: MatchRecord) -> in
                         point.point_won,
                         point.point_end_type,
                         point.net_approach,
-                        point.net_point_won,
                         point.is_tiebreak_game,
                         point.notes,
                     ),

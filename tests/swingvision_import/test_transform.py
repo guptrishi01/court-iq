@@ -30,7 +30,6 @@ def test_ace_is_not_flagged_but_unforced_error_is(synthetic_xlsx):
 def test_net_fields_default_to_manual_fill_in(synthetic_xlsx):
     for point in _record(synthetic_xlsx).sets[0].points:
         assert point.net_approach is False
-        assert point.net_point_won is None
 
 
 def test_points_are_ordered_within_each_set(synthetic_xlsx):

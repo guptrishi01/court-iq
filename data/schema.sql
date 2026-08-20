@@ -63,10 +63,27 @@ CREATE TABLE point (
                         'return_error'
                     )),
     net_approach     BOOLEAN NOT NULL DEFAULT FALSE,
-    net_point_won    BOOLEAN,
     is_tiebreak_game BOOLEAN NOT NULL DEFAULT FALSE,
     notes            TEXT,
     created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    -- point_end_type functionally determines point_won (an ace/winner/
+    -- return_winner always means the tracked player won the point; a
+    -- double_fault/unforced_error/forced_error/return_error always means
+    -- they lost it). point_won stays a stored column rather than a derived
+    -- value on purpose - it's independently reviewable during manual
+    -- review, matching the app's "no single auto-tag is trusted alone"
+    -- philosophy - but this CHECK keeps the two from ever silently
+    -- disagreeing. (net_point_won was dropped entirely: it was always
+    -- exactly equal to point_won whenever net_approach was true, pure
+    -- redundant storage with no independent value - see the Net Approach
+    -- Effectiveness example query below for the derived equivalent.)
+    CHECK (
+        (point_end_type IN ('ace', 'winner', 'return_winner') AND point_won = TRUE)
+        OR
+        (point_end_type IN ('double_fault', 'unforced_error', 'forced_error', 'return_error')
+            AND point_won = FALSE)
+    ),
 
     FOREIGN KEY (set_id) REFERENCES "set"(set_id) ON DELETE CASCADE
 );
@@ -137,9 +154,11 @@ CREATE INDEX idx_match_date ON match(date);
 -- WHERE s.match_id = ?;
 
 -- Net Approach Effectiveness (match level)
+-- net_point_won isn't a stored column - a net approach's own success is
+-- always just point_won, restricted to net_approach points.
 -- SELECT
 --     SUM(CASE WHEN net_approach = TRUE THEN 1 ELSE 0 END) AS net_approaches,
---     SUM(CASE WHEN net_approach = TRUE AND net_point_won = TRUE THEN 1 ELSE 0 END) AS net_points_won
+--     SUM(CASE WHEN net_approach = TRUE AND point_won = TRUE THEN 1 ELSE 0 END) AS net_points_won
 -- FROM point p
 -- JOIN "set" s ON p.set_id = s.set_id
 -- WHERE s.match_id = ?;

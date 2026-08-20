@@ -73,7 +73,6 @@ def test_from_dict_applies_defaults_for_a_hand_trimmed_dict():
     point = record.sets[0].points[0]
     assert point.needs_review is False
     assert point.net_approach is False
-    assert point.net_point_won is None
 
 
 def test_records_with_identical_field_values_are_equal():

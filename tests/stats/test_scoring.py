@@ -23,7 +23,6 @@ def _point(
         point_won=point_won,
         point_end_type="winner" if point_won else "unforced_error",
         net_approach=False,
-        net_point_won=None,
         is_tiebreak_game=is_tiebreak_game,
     )
 

@@ -80,7 +80,6 @@ def test_reconstruct_point_net_approach_via_volley_stroke():
     point = reconstruct_point(1, shots, HOST)
 
     assert point.net_approach is True
-    assert point.net_point_won == point.point_won
 
 
 def test_reconstruct_point_no_net_approach_without_a_volley_or_overhead():
@@ -92,7 +91,6 @@ def test_reconstruct_point_no_net_approach_without_a_volley_or_overhead():
     point = reconstruct_point(1, shots, HOST)
 
     assert point.net_approach is False
-    assert point.net_point_won is None
 
 
 def test_reconstruct_point_returns_none_for_a_gap():
@@ -157,7 +155,6 @@ def _point(point_won: bool) -> ReconstructedPoint:
         second_serve_in=None,
         point_end_type="winner" if point_won else "unforced_error",
         net_approach=False,
-        net_point_won=None,
     )
 
 

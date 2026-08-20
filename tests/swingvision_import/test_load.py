@@ -92,7 +92,7 @@ def test_finalize_writes_all_sets_and_points_for_a_multi_set_match(tmp_path):
                 games_lost=4,
                 points=[
                     PointRecord(1, 1, True, True, "ace"),
-                    PointRecord(1, 2, True, True, "double_fault"),
+                    PointRecord(1, 2, True, False, "double_fault"),
                 ],
             ),
             SetRecord(

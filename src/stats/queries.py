@@ -32,7 +32,6 @@ _FETCH_POINTS_SQL = """
         p.point_won,
         p.point_end_type,
         p.net_approach,
-        p.net_point_won,
         p.is_tiebreak_game
     FROM point p
     JOIN "set" s ON p.set_id = s.set_id
@@ -86,8 +85,7 @@ def _fetch_points(
             point_won=bool(row[6]),
             point_end_type=row[7],
             net_approach=bool(row[8]),
-            net_point_won=None if row[9] is None else bool(row[9]),
-            is_tiebreak_game=bool(row[10]),
+            is_tiebreak_game=bool(row[9]),
         )
         for row in cursor.fetchall()
     ]
@@ -229,7 +227,7 @@ def net_stats_from_points(points: list[PointRow]) -> NetStats:
         The net stats for that scope.
     """
     net_approaches = sum(1 for p in points if p.net_approach)
-    net_points_won = sum(1 for p in points if p.net_approach and p.net_point_won)
+    net_points_won = sum(1 for p in points if p.net_approach and p.point_won)
     return NetStats(
         net_approaches=net_approaches,
         net_points_won=net_points_won,

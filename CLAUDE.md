@@ -19,7 +19,9 @@ There is no dedicated wall/backboard session mode in SwingVision (only Match, Ra
 
 ## Database schema
 
-`data/schema.sql` defines the `match` / `set` / `point` tables (SQLite). This is now finalized — no new columns were added for SwingVision's review-flag tracking; that lives entirely in the pre-SQL JSON staging step described below, not in the database.
+`data/schema.sql` defines the `match` / `set` / `point` tables (SQLite). No new columns were added for SwingVision's review-flag tracking; that lives entirely in the pre-SQL JSON staging step described below, not in the database. `import_notes`/`shot_pattern_summary` (informational data-quality findings and coaching-context enrichment, both described below) live the same way — in the staged JSON only, never as new database columns.
+
+**3NF pass on `point`:** `net_point_won` was dropped — it was always exactly equal to `point_won` whenever `net_approach` was true (pure redundant storage, confirmed against its own docstring and `docs/stat-definitions.md`'s NPW formula), so a net approach's own success is now always just `net_approach = TRUE AND point_won = TRUE` at query time, never a stored column. `point_end_type` also functionally determines `point_won` for all 7 values (e.g. `'ace'` always means `point_won=TRUE`), but `point_won` stays a separate stored column on purpose — it's independently reviewable during manual review, matching the "no single auto-tag is trusted alone" philosophy the whole SwingVision pipeline is built around. A `CHECK` constraint on `point` enforces the two never silently disagree instead.
 
 ## SwingVision import pipeline
 

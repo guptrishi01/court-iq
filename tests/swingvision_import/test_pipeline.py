@@ -12,6 +12,7 @@ from swingvision_import.pipeline import SwingVisionImportPipeline
 from swingvision_import.records import MatchRecord
 from swingvision_import.review import load_pending, save_pending
 from tests.ai.conftest import FakeMessage, FakeTextBlock
+from tests.swingvision_import.conftest import add_settings_and_shots_sheets
 
 
 def _clear_review_flags(pipeline, json_path):
@@ -107,6 +108,89 @@ def test_ingest_falls_back_to_shot_reconstruction_when_points_sheet_is_empty(
     assert all(p.source_point_number is not None for p in all_points)
     # Point 1 was a single In serve shot by the host - an ace.
     assert any(p.point_end_type == "ace" for p in all_points)
+
+
+def test_ingest_populates_import_notes_with_quality_check_and_gap_findings(
+    synthetic_non_pro_xlsx, import_config
+):
+    pipeline = SwingVisionImportPipeline(import_config)
+
+    json_path = pipeline.ingest(
+        synthetic_non_pro_xlsx,
+        date="2026-08-06",
+        opponent="Alex",
+        result="W",
+        first_server_by_set={1: "opponent"},  # deliberately wrong ground truth
+        tracked_identity="Someone Else",  # deliberately wrong identity
+    )
+    record = load_pending(json_path)
+
+    notes = " | ".join(record.import_notes)
+    assert "had no shot data" in notes  # point 2 is a gap
+    assert "reversed" in notes  # serve-order mismatch
+    assert "Someone Else" in notes  # identity mismatch
+    assert "does not match" in notes  # reconstructed score vs Sets-sheet summary
+
+
+def test_ingest_skips_serve_order_and_identity_checks_when_not_supplied(
+    synthetic_non_pro_xlsx, import_config
+):
+    pipeline = SwingVisionImportPipeline(import_config)
+
+    json_path = pipeline.ingest(
+        synthetic_non_pro_xlsx, date="2026-08-06", opponent="Alex", result="W"
+    )
+    record = load_pending(json_path)
+
+    notes = " | ".join(record.import_notes)
+    assert "reversed" not in notes
+    assert "identified yourself" not in notes
+
+
+def test_ingest_matching_identity_produces_no_identity_note(
+    synthetic_non_pro_xlsx, import_config
+):
+    pipeline = SwingVisionImportPipeline(import_config)
+
+    json_path = pipeline.ingest(
+        synthetic_non_pro_xlsx,
+        date="2026-08-06",
+        opponent="Alex",
+        result="W",
+        tracked_identity="Test Player",
+    )
+    record = load_pending(json_path)
+
+    assert "identified yourself" not in " | ".join(record.import_notes)
+
+
+def test_ingest_reports_excluded_non_match_points_in_import_notes(tmp_path, import_config):
+    workbook = Workbook()
+    sets_sheet = workbook.active
+    sets_sheet.title = "Sets"
+    sets_sheet.append(["Set", "Host Score", "Guest Score", "Set Winner"])
+    sets_sheet.append([1, 0, 0, "host"])
+    workbook.create_sheet("Games").append(["Game", "Set", "Server", "Game Winner"])
+    workbook.create_sheet("Points").append(
+        ["Point", "Game", "Set", "Match Server", "Point Winner", "Detail"]
+    )
+    shot_rows = [
+        [1, 1, "Test Player", "first_serve", "Serve", "In"],
+        [1, 2, "Test Opponent", "first_return", "Backhand", "Net"],
+        # Point 2: a fed ball, not real rallying - should be excluded, not
+        # counted as a real point.
+        [2, 0, "Test Player", "none", "Feed", "In"],
+        [2, 1, "Test Opponent", "none", "Backhand", "Net"],
+    ]
+    add_settings_and_shots_sheets(workbook, shot_rows=shot_rows)
+    path = tmp_path / "with_feed_point.xlsx"
+    workbook.save(path)
+
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest(path, date="2026-08-06", opponent="Alex", result="W")
+    record = load_pending(json_path)
+
+    assert any("excluded as non-match activity" in note for note in record.import_notes)
 
 
 class _FakeSuggestionMessages:

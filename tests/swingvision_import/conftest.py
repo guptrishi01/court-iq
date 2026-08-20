@@ -71,7 +71,10 @@ def synthetic_xlsx(tmp_path: Path) -> Path:
     )
     points_sheet.append([1, 1, 1, "host", "host", True, None, "ace"])
     points_sheet.append([1, 1, 2, "host", "host", False, True, "winner"])
-    points_sheet.append([1, 2, 1, "guest", "host", True, None, "unforced_error"])
+    # Guest serves, host commits an unforced error - guest wins the point,
+    # consistent with the point/point_end_type CHECK constraint in
+    # data/schema.sql (an unforced_error always means point_won=False).
+    points_sheet.append([1, 2, 1, "guest", "guest", True, None, "unforced_error"])
 
     add_settings_and_shots_sheets(workbook)
 
