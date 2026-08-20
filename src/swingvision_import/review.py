@@ -14,7 +14,7 @@ from .records import MatchRecord
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
 
 
-def _filename_slug(value: str) -> str:
+def slugify_filename(value: str) -> str:
     """Turns free text into a filesystem-safe filename component.
 
     Args:
@@ -44,7 +44,7 @@ def save_pending(record: MatchRecord, pending_dir: Path) -> Path:
         Path to the written JSON file.
     """
     pending_dir.mkdir(parents=True, exist_ok=True)
-    opponent_slug = _filename_slug(record.opponent)
+    opponent_slug = slugify_filename(record.opponent)
     path = pending_dir / f"{record.date}_{opponent_slug}.json"
     path.write_text(json.dumps(record.to_dict(), indent=2), encoding="utf-8")
     return path

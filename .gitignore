@@ -24,6 +24,10 @@ __pycache__/
 # SwingVision staging data - personal match data, not code
 src/swingvision_import/pending/
 
+# Web UI uploads (xlsx exports + match video) - personal match data, not code
+data/uploads/
+data/media/
+
 # Generated AI coaching reports and rendered HTML - personal data, not code
 ai/reports/
 reports/output/

@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Court IQ — Import Result</title>
+  <style>
+    body { font-family: sans-serif; max-width: 640px; margin: 2rem auto; }
+    .flags { font-weight: bold; }
+    ul { padding-left: 1.2rem; }
+    button { margin-top: 1rem; padding: 0.6rem 1.2rem; }
+  </style>
+</head>
+<body>
+  <h1>Staged: {{ date }} vs {{ opponent }}</h1>
+  <p>Pending file: <code>{{ json_filename }}</code></p>
+  <p class="flags">{{ flag_count }} point(s) still need review before this match can be finalized.</p>
+
+  <h2>Data-quality notes</h2>
+  {% if import_notes %}
+  <ul>
+    {% for note in import_notes %}
+    <li>{{ note }}</li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p>No data-quality notes.</p>
+  {% endif %}
+
+  {% if not suggested %}
+  <form method="post" action="/suggest">
+    <input type="hidden" name="json_filename" value="{{ json_filename }}">
+    <button type="submit">Run Claude suggestions now (spends real API money)</button>
+  </form>
+  {% else %}
+  <p>Claude suggestions have been added to the pending file.</p>
+  {% endif %}
+
+  <p><a href="/">Import another match</a></p>
+</body>
+</html>
