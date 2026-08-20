@@ -77,9 +77,16 @@ def unresolved_flags(record: MatchRecord) -> list[str]:
     flags = []
     for set_record in record.sets:
         for point in set_record.points:
-            if point.needs_review:
-                flags.append(
-                    f"set {set_record.set_number} game {point.game_number} "
-                    f"point {point.point_number}: '{point.point_end_type}' needs confirmation"
+            if not point.needs_review:
+                continue
+            message = (
+                f"set {set_record.set_number} game {point.game_number} "
+                f"point {point.point_number}: '{point.point_end_type}' needs confirmation"
+            )
+            if point.ai_suggested_point_end_type is not None:
+                message += (
+                    f" (Claude suggests '{point.ai_suggested_point_end_type}': "
+                    f"{point.ai_suggestion_reasoning})"
                 )
+            flags.append(message)
     return flags

@@ -33,10 +33,25 @@ class PointRecord:
         is_tiebreak_game: Whether this point was played in a tiebreak game.
         needs_review: True when point_end_type came from one of
             SwingVision's less reliable AI-guessed categories (see
-            config.NEEDS_REVIEW_END_TYPES) and hasn't been confirmed by
+            config.NEEDS_REVIEW_END_TYPES) or from reconstruct.py's
+            Shots-based heuristic (which flags every point it produces,
+            not just the ambiguous ones), and hasn't been confirmed by
             hand yet. finalize_and_load refuses to write a match while this
             is True on any of its points.
         notes: Free-text notes for this point.
+        ai_suggested_point_end_type: A Claude-suggested refinement of
+            point_end_type, from review_assist.py — set only when the user
+            has explicitly run that (opt-in, costs an API call) step.
+            Never clears needs_review by itself: per the user's explicit
+            rule, a Claude suggestion is one more thing to confirm, not a
+            second silent auto-tagger.
+        ai_suggestion_reasoning: The reasoning Claude gave for that
+            suggestion, shown alongside it during review.
+        source_point_number: The original SwingVision match-wide "Point"
+            number this was reconstructed from (see reconstruct.py), or
+            None for a point that came from a direct Points-sheet parse.
+            Lets pipeline.suggest() re-fetch this point's raw shots from
+            the source export without re-deriving the mapping.
     """
 
     game_number: int
@@ -51,6 +66,9 @@ class PointRecord:
     is_tiebreak_game: bool = False
     needs_review: bool = False
     notes: str | None = None
+    ai_suggested_point_end_type: str | None = None
+    ai_suggestion_reasoning: str | None = None
+    source_point_number: int | None = None
 
 
 @dataclass

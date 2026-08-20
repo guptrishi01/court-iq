@@ -13,6 +13,14 @@ __pycache__/
 *.sqlite
 *.sqlite3
 
+# Raw/exported match footage - large, personal, not code
+*.mp4
+*.mov
+
+# Real SwingVision exports - personal match data, not code (test fixtures are
+# built in-memory via openpyxl, never stored as real .xlsx files)
+*.xlsx
+
 # SwingVision staging data - personal match data, not code
 src/swingvision_import/pending/
 

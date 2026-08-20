@@ -60,6 +60,37 @@ def test_unresolved_flags_reports_every_flagged_point_across_multiple_sets():
     assert any("set 2" in f and "point 1" in f for f in flags)
 
 
+def test_unresolved_flags_includes_the_ai_suggestion_when_present():
+    point = PointRecord(
+        game_number=1,
+        point_number=1,
+        is_serving=True,
+        point_won=False,
+        point_end_type="unforced_error",
+        needs_review=True,
+        ai_suggested_point_end_type="forced_error",
+        ai_suggestion_reasoning="Wide angle return left no time to recover.",
+    )
+    record = MatchRecord(
+        date="2026-08-06",
+        opponent="Alex",
+        result="W",
+        sets=[SetRecord(set_number=1, games_won=6, games_lost=4, points=[point])],
+    )
+
+    flags = unresolved_flags(record)
+
+    assert len(flags) == 1
+    assert "Claude suggests 'forced_error'" in flags[0]
+    assert "Wide angle return" in flags[0]
+
+
+def test_unresolved_flags_omits_suggestion_text_when_none_was_generated():
+    flags = unresolved_flags(_sample_record(needs_review=True))
+
+    assert "Claude suggests" not in flags[0]
+
+
 def test_save_pending_sanitizes_filesystem_unsafe_characters_in_opponent_name(tmp_path: Path):
     record = _sample_record(needs_review=False)
     record.opponent = 'Team A/B: "The Rematch"?'

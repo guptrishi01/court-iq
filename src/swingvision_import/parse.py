@@ -13,7 +13,7 @@ from typing import Any
 from openpyxl import load_workbook
 
 from .config import ImportConfig
-from .raw import RawGameRow, RawMatchExport, RawPointRow, RawSetRow
+from .raw import RawGameRow, RawMatchExport, RawPointRow, RawSetRow, RawSettings, RawShotRow
 
 # Fields that may legitimately be absent from a real export (SwingVision may
 # not always report a second-serve column on an ace/first-serve-in point,
@@ -139,18 +139,20 @@ class SwingVisionParser:
             xlsx_path: Path to the exported .xlsx file.
 
         Returns:
-            The parsed sets, games, and points.
+            The parsed settings, sets, games, points, and shots.
 
         Raises:
             ValueError: If a required column can't be found in one of the
-                Sets, Games, or Points sheets.
+                Settings, Sets, Games, Points, or Shots sheets.
         """
         workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
         try:
             return RawMatchExport(
+                settings=self._parse_settings(workbook),
                 sets=self._parse_sets(workbook),
                 games=self._parse_games(workbook),
                 points=self._parse_points(workbook),
+                shots=self._parse_shots(workbook),
             )
         finally:
             workbook.close()
@@ -219,6 +221,56 @@ class SwingVisionParser:
             for row in rows
             if _cell(row, columns, "game_number") is not None
         ]
+
+    def _parse_settings(self, workbook: Any) -> RawSettings | None:
+        """Parses the "Settings" sheet's single data row.
+
+        Unlike the other sheets, Settings has exactly one real data row
+        (match metadata), followed by blank rows and then coordinate-system
+        footnote text — so this reads only the first row after the header,
+        rather than looping until some column goes blank.
+
+        Args:
+            workbook: The open openpyxl Workbook.
+
+        Returns:
+            The match's host/guest names, or None if the sheet had no data
+            row at all.
+        """
+        columns, rows = self._sheet_rows(workbook, "settings")
+        row = next(rows, None)
+        if row is None:
+            return None
+        return RawSettings(
+            host_name=str(_cell(row, columns, "host_name")),
+            guest_name=str(_cell(row, columns, "guest_name")),
+        )
+
+    def _parse_shots(self, workbook: Any) -> list[RawShotRow]:
+        """Parses the "Shots" sheet.
+
+        Args:
+            workbook: The open openpyxl Workbook.
+
+        Returns:
+            One RawShotRow per non-blank row in the sheet.
+        """
+        columns, rows = self._sheet_rows(workbook, "shots")
+        shots = []
+        for row in rows:
+            if _cell(row, columns, "point_number") is None:
+                continue
+            shots.append(
+                RawShotRow(
+                    point_number=int(_cell(row, columns, "point_number")),
+                    shot_number=int(_cell(row, columns, "shot_number")),
+                    player=str(_cell(row, columns, "player")),
+                    shot_type=str(_cell(row, columns, "shot_type")),
+                    stroke=str(_cell(row, columns, "stroke")),
+                    result=str(_cell(row, columns, "result")),
+                )
+            )
+        return shots
 
     def _parse_points(self, workbook: Any) -> list[RawPointRow]:
         """Parses the "Points" sheet.

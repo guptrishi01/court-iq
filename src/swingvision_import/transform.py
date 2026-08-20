@@ -80,8 +80,8 @@ def transform(
         point = PointRecord(
             game_number=raw_point.game_number,
             point_number=raw_point.point_number,
-            is_serving=raw_point.server.strip().lower() == "player",
-            point_won=raw_point.winner.strip().lower() == "player",
+            is_serving=raw_point.server.strip().lower() == "host",
+            point_won=raw_point.winner.strip().lower() == "host",
             point_end_type=end_type,
             first_serve_in=raw_point.first_serve_in,
             second_serve_in=raw_point.second_serve_in,

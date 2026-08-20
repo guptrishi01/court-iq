@@ -40,14 +40,14 @@ def test_points_are_ordered_within_each_set(synthetic_xlsx):
 
 def test_unrecognized_end_type_raises_instead_of_silently_mapping():
     raw = RawMatchExport(
-        sets=[RawSetRow(set_number=1, winner="player", games_won=6, games_lost=4)],
+        sets=[RawSetRow(set_number=1, winner="host", games_won=6, games_lost=4)],
         points=[
             RawPointRow(
                 set_number=1,
                 game_number=1,
                 point_number=1,
-                server="player",
-                winner="player",
+                server="host",
+                winner="host",
                 end_type="let",
             )
         ],
@@ -59,13 +59,13 @@ def test_unrecognized_end_type_raises_instead_of_silently_mapping():
 def test_points_are_grouped_into_the_correct_set_not_flattened():
     raw = RawMatchExport(
         sets=[
-            RawSetRow(set_number=1, winner="player", games_won=6, games_lost=4),
-            RawSetRow(set_number=2, winner="opponent", games_won=3, games_lost=6),
+            RawSetRow(set_number=1, winner="host", games_won=6, games_lost=4),
+            RawSetRow(set_number=2, winner="guest", games_won=3, games_lost=6),
         ],
         points=[
-            RawPointRow(1, 1, 1, "player", "player", "ace"),
-            RawPointRow(1, 1, 2, "player", "player", "winner"),
-            RawPointRow(2, 1, 1, "opponent", "opponent", "double_fault"),
+            RawPointRow(1, 1, 1, "host", "host", "ace"),
+            RawPointRow(1, 1, 2, "host", "host", "winner"),
+            RawPointRow(2, 1, 1, "guest", "guest", "double_fault"),
         ],
     )
     record = transform(raw, date="2026-08-06", opponent="Alex", result="L", config=ImportConfig())
@@ -80,7 +80,7 @@ def test_points_are_grouped_into_the_correct_set_not_flattened():
 
 def test_set_with_zero_points_is_kept_not_dropped():
     raw = RawMatchExport(
-        sets=[RawSetRow(set_number=1, winner="player", games_won=6, games_lost=0)],
+        sets=[RawSetRow(set_number=1, winner="host", games_won=6, games_lost=0)],
         points=[],
     )
     record = transform(raw, date="2026-08-06", opponent="Alex", result="W", config=ImportConfig())
@@ -91,8 +91,8 @@ def test_set_with_zero_points_is_kept_not_dropped():
 
 def test_server_and_winner_matching_is_case_and_whitespace_insensitive():
     raw = RawMatchExport(
-        sets=[RawSetRow(set_number=1, winner="player", games_won=6, games_lost=4)],
-        points=[RawPointRow(1, 1, 1, "  Player ", "PLAYER", "ace")],
+        sets=[RawSetRow(set_number=1, winner="host", games_won=6, games_lost=4)],
+        points=[RawPointRow(1, 1, 1, "  Host ", "HOST", "ace")],
     )
     record = transform(raw, date="2026-08-06", opponent="Alex", result="W", config=ImportConfig())
 
@@ -102,7 +102,7 @@ def test_server_and_winner_matching_is_case_and_whitespace_insensitive():
 
 
 def test_match_overrides_are_passed_through_to_the_record():
-    raw = RawMatchExport(sets=[RawSetRow(set_number=1, winner="player", games_won=6, games_lost=4)])
+    raw = RawMatchExport(sets=[RawSetRow(set_number=1, winner="host", games_won=6, games_lost=4)])
     record = transform(
         raw,
         date="2026-08-06",

@@ -1,0 +1,252 @@
+from __future__ import annotations
+
+from swingvision_import.raw import RawShotRow
+from swingvision_import.reconstruct import (
+    ReconstructedPoint,
+    assign_game_set_boundaries,
+    group_shots_by_point,
+    reconstruct_all,
+    reconstruct_point,
+)
+
+HOST = "Rishi Gupta"
+GUEST = "Opponent"
+
+
+def _shot(point, shot, player, shot_type, stroke, result) -> RawShotRow:
+    return RawShotRow(point, shot, player, shot_type, stroke, result)
+
+
+def test_reconstruct_point_clean_host_winner_at_the_serve():
+    shots = [
+        _shot(1, 1, HOST, "first_serve", "Serve", "In"),
+        _shot(1, 2, GUEST, "first_return", "Forehand", "In"),
+        _shot(1, 3, HOST, "serve_plus_one", "Forehand", "In"),
+    ]
+
+    point = reconstruct_point(1, shots, HOST)
+
+    assert point.is_serving is True
+    assert point.point_won is True
+    assert point.point_end_type == "winner"
+
+
+def test_reconstruct_point_host_unforced_error_after_own_serve():
+    shots = [
+        _shot(1, 1, HOST, "first_serve", "Serve", "In"),
+        _shot(1, 2, GUEST, "first_return", "Forehand", "In"),
+        _shot(1, 3, HOST, "in_play", "Backhand", "Net"),
+    ]
+
+    point = reconstruct_point(1, shots, HOST)
+
+    assert point.point_won is False
+    assert point.point_end_type == "unforced_error"
+
+
+def test_reconstruct_point_ace():
+    shots = [_shot(5, 1, HOST, "first_serve", "Serve", "In")]
+
+    point = reconstruct_point(5, shots, HOST)
+
+    assert point.point_end_type == "ace"
+    assert point.point_won is True
+
+
+def test_reconstruct_point_double_fault_ignores_the_ambiguous_trailing_shot():
+    # Mirrors the real, confirmed-ambiguous pattern: a second_serve marked
+    # Out (a fault) followed by a second_return shot in the same point,
+    # which shouldn't happen if the serve genuinely faulted. The serve
+    # shot's own Result is authoritative regardless.
+    shots = [
+        _shot(6, 1, HOST, "second_serve", "Serve", "Out"),
+        _shot(6, 2, GUEST, "second_return", "Backhand", "In"),
+    ]
+
+    point = reconstruct_point(6, shots, HOST)
+
+    assert point.point_end_type == "double_fault"
+    assert point.point_won is False
+
+
+def test_reconstruct_point_net_approach_via_volley_stroke():
+    shots = [
+        _shot(1, 1, GUEST, "first_serve", "Serve", "In"),
+        _shot(1, 2, HOST, "first_return", "Forehand", "In"),
+        _shot(1, 3, GUEST, "serve_plus_one", "Forehand", "In"),
+        _shot(1, 4, HOST, "in_play", "Forehand Volley", "In"),
+    ]
+
+    point = reconstruct_point(1, shots, HOST)
+
+    assert point.net_approach is True
+    assert point.net_point_won == point.point_won
+
+
+def test_reconstruct_point_no_net_approach_without_a_volley_or_overhead():
+    shots = [
+        _shot(1, 1, HOST, "first_serve", "Serve", "In"),
+        _shot(1, 2, GUEST, "first_return", "Forehand", "Net"),
+    ]
+
+    point = reconstruct_point(1, shots, HOST)
+
+    assert point.net_approach is False
+    assert point.net_point_won is None
+
+
+def test_reconstruct_point_returns_none_for_a_gap():
+    assert reconstruct_point(4, [], HOST) is None
+
+
+def test_reconstruct_point_return_winner_when_the_point_ends_at_the_return():
+    shots = [
+        _shot(1, 1, GUEST, "first_serve", "Serve", "In"),
+        _shot(1, 2, HOST, "first_return", "Forehand", "In"),
+    ]
+
+    point = reconstruct_point(1, shots, HOST)
+
+    assert point.is_serving is False
+    assert point.point_end_type == "return_winner"
+
+
+def test_reconstruct_point_return_error_when_the_return_itself_misses():
+    shots = [
+        _shot(1, 1, GUEST, "first_serve", "Serve", "In"),
+        _shot(1, 2, HOST, "first_return", "Forehand", "Net"),
+    ]
+
+    point = reconstruct_point(1, shots, HOST)
+
+    assert point.point_end_type == "return_error"
+
+
+def test_reconstruct_point_uses_generic_winner_not_return_winner_past_the_return():
+    shots = [
+        _shot(1, 1, GUEST, "first_serve", "Serve", "In"),
+        _shot(1, 2, HOST, "first_return", "Forehand", "In"),
+        _shot(1, 3, GUEST, "serve_plus_one", "Forehand", "In"),
+        _shot(1, 4, HOST, "return_plus_one", "Backhand", "In"),
+    ]
+
+    point = reconstruct_point(1, shots, HOST)
+
+    assert point.point_end_type == "winner"
+
+
+def test_group_shots_by_point_sorts_by_shot_number():
+    shots = [
+        _shot(1, 2, HOST, "first_return", "Forehand", "In"),
+        _shot(1, 1, GUEST, "first_serve", "Serve", "In"),
+        _shot(2, 1, HOST, "first_serve", "Serve", "In"),
+    ]
+
+    grouped = group_shots_by_point(shots)
+
+    assert [s.shot_number for s in grouped[1]] == [1, 2]
+    assert list(grouped[2]) == [shots[2]]
+
+
+def _point(point_won: bool) -> ReconstructedPoint:
+    return ReconstructedPoint(
+        point_number=0,
+        is_serving=True,
+        point_won=point_won,
+        first_serve_in=True,
+        second_serve_in=None,
+        point_end_type="winner" if point_won else "unforced_error",
+        net_approach=False,
+        net_point_won=None,
+    )
+
+
+def _quick_game(host_wins: bool) -> list[ReconstructedPoint]:
+    """4 points, all won by one side - the fastest possible game."""
+    return [_point(host_wins) for _ in range(4)]
+
+
+def test_assign_game_set_boundaries_numbers_points_within_a_game():
+    sets = assign_game_set_boundaries(_quick_game(host_wins=True))
+
+    assert len(sets) == 1
+    assert sets[0].games_won == 1
+    assert sets[0].games_lost == 0
+    assert [p.point_number for p in sets[0].points] == [1, 2, 3, 4]
+    assert all(p.game_number == 1 for p in sets[0].points)
+    assert all(not p.is_tiebreak_game for p in sets[0].points)
+
+
+def test_assign_game_set_boundaries_handles_a_deuce_game():
+    # 3-3 (deuce), then host wins the next two points to close the game.
+    points = [_point(True), _point(False), _point(True), _point(False), _point(True), _point(False)]
+    points += [_point(True), _point(True)]
+
+    sets = assign_game_set_boundaries(points)
+
+    assert len(sets) == 1
+    assert sets[0].games_won == 1
+    assert sets[0].games_lost == 0
+    assert len(sets[0].points) == 8
+
+
+def test_assign_game_set_boundaries_flags_points_in_a_six_all_tiebreak():
+    # 6 games to host, 6 to guest (4 points each, alternating), then a
+    # tiebreak-game's worth of points on top.
+    points: list[ReconstructedPoint] = []
+    for i in range(12):
+        points += _quick_game(host_wins=(i % 2 == 0))
+    tiebreak_points = [_point(True) for _ in range(7)]
+    points += tiebreak_points
+
+    sets = assign_game_set_boundaries(points)
+
+    # 12 regular games (6-6) plus a completed 7-0 tiebreak game -> the set
+    # closes 7-6 to host.
+    assert len(sets) == 1
+    assert sets[0].games_won == 7
+    assert sets[0].games_lost == 6
+    assert sets[0].is_tiebreak_set is True
+    tiebreak_game_points = [p for p in sets[0].points if p.game_number == 13]
+    assert len(tiebreak_game_points) == 7
+    assert all(p.is_tiebreak_game for p in tiebreak_game_points)
+    non_tiebreak_points = [p for p in sets[0].points if p.game_number != 13]
+    assert all(not p.is_tiebreak_game for p in non_tiebreak_points)
+
+
+def test_assign_game_set_boundaries_leaves_a_trailing_partial_game_uncounted_as_a_set():
+    # Only 2 points played in game 1 - an interrupted recording. Still
+    # returned as a (partial) set rather than dropped.
+    sets = assign_game_set_boundaries([_point(True), _point(False)])
+
+    assert len(sets) == 1
+    assert len(sets[0].points) == 2
+    assert sets[0].games_won == 0
+    assert sets[0].games_lost == 0
+
+
+def test_assign_game_set_boundaries_no_ad_scoring_wins_at_four_regardless_of_margin():
+    # 3-3 (deuce under ad-scoring), then one more point - under no-ad this
+    # wins the game outright at 4-3, not requiring a 2-point margin.
+    points = [_point(True), _point(False), _point(True), _point(False), _point(True), _point(False)]
+    points.append(_point(True))
+
+    sets = assign_game_set_boundaries(points, ad_scoring=False)
+
+    assert len(sets) == 1
+    assert sets[0].games_won == 1
+    assert len(sets[0].points) == 7
+
+
+def test_reconstruct_all_skips_gaps_and_reports_them():
+    shots = [
+        _shot(1, 1, HOST, "first_serve", "Serve", "In"),
+        # Point 2: a gap, no shots at all.
+        _shot(3, 1, HOST, "first_serve", "Serve", "In"),
+    ]
+
+    sets, skipped = reconstruct_all(shots, HOST)
+
+    assert skipped == [2]
+    total_points = sum(len(s.points) for s in sets)
+    assert total_points == 2
