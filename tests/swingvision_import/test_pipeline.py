@@ -319,3 +319,150 @@ def test_suggest_continues_past_one_points_suggestion_failure(
     assert len(succeeded) == 1
     assert len(failed) == 1
     assert any("Suggestion failed" in r.message for r in caplog.records)
+
+
+def _build_non_pro_xlsx(tmp_path, filename: str, shot_rows: list[list], **settings_kwargs):
+    workbook = Workbook()
+    sets_sheet = workbook.active
+    sets_sheet.title = "Sets"
+    sets_sheet.append(["Set", "Host Score", "Guest Score", "Set Winner"])
+    workbook.create_sheet("Games").append(["Game", "Set", "Server", "Game Winner"])
+    workbook.create_sheet("Points").append(
+        ["Point", "Game", "Set", "Match Server", "Point Winner", "Detail"]
+    )
+    add_settings_and_shots_sheets(workbook, shot_rows=shot_rows, **settings_kwargs)
+    path = tmp_path / filename
+    workbook.save(path)
+    return path
+
+
+def test_ingest_multi_part_merges_a_game_spanning_the_file_boundary(tmp_path, import_config):
+    # 3 straight host points in part 1 - not enough alone to complete a
+    # game (needs 4). 1 more host point in part 2, whose own Point counter
+    # restarts from 1 - only merging correctly completes the game 4-0.
+    part1 = _build_non_pro_xlsx(
+        tmp_path,
+        "part1.xlsx",
+        [
+            [1, 1, "Test Player", "first_serve", "Serve", "In"],
+            [2, 1, "Test Player", "first_serve", "Serve", "In"],
+            [3, 1, "Test Player", "first_serve", "Serve", "In"],
+        ],
+    )
+    part2 = _build_non_pro_xlsx(
+        tmp_path, "part2.xlsx", [[1, 1, "Test Player", "first_serve", "Serve", "In"]]
+    )
+
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest_multi_part(
+        [part1, part2], date="2026-08-18", opponent="Real Opponent", result="W"
+    )
+    record = load_pending(json_path)
+
+    all_points = [p for s in record.sets for p in s.points]
+    assert len(all_points) == 4
+    assert record.source_files == [str(part1), str(part2)]
+    assert record.sets[-1].games_won == 1
+    assert record.sets[-1].games_lost == 0
+    assert any("Merged from 2 files" in note for note in record.import_notes)
+
+
+def test_ingest_multi_part_rejects_fewer_than_two_files(tmp_path, import_config):
+    part1 = _build_non_pro_xlsx(
+        tmp_path, "part1.xlsx", [[1, 1, "Test Player", "first_serve", "Serve", "In"]]
+    )
+    pipeline = SwingVisionImportPipeline(import_config)
+
+    with pytest.raises(ValueError, match="at least 2 files"):
+        pipeline.ingest_multi_part(
+            [part1], date="2026-08-18", opponent="Real Opponent", result="W"
+        )
+
+
+def test_ingest_multi_part_rejects_files_that_disagree_on_host_name(tmp_path, import_config):
+    part1 = _build_non_pro_xlsx(
+        tmp_path,
+        "part1.xlsx",
+        [[1, 1, "Test Player", "first_serve", "Serve", "In"]],
+        host_name="Rishi Gupta",
+    )
+    part2 = _build_non_pro_xlsx(
+        tmp_path,
+        "part2.xlsx",
+        [[1, 1, "Someone Else", "first_serve", "Serve", "In"]],
+        host_name="Someone Else",
+    )
+    pipeline = SwingVisionImportPipeline(import_config)
+
+    with pytest.raises(ValueError, match="disagree"):
+        pipeline.ingest_multi_part(
+            [part1, part2], date="2026-08-18", opponent="Real Opponent", result="W"
+        )
+
+
+def test_ingest_multi_part_rejects_a_file_with_no_settings_sheet(tmp_path, import_config):
+    part1 = _build_non_pro_xlsx(
+        tmp_path, "part1.xlsx", [[1, 1, "Test Player", "first_serve", "Serve", "In"]]
+    )
+
+    workbook = Workbook()
+    sets_sheet = workbook.active
+    sets_sheet.title = "Sets"
+    sets_sheet.append(["Set", "Host Score", "Guest Score", "Set Winner"])
+    workbook.create_sheet("Games").append(["Game", "Set", "Server", "Game Winner"])
+    workbook.create_sheet("Points").append(
+        ["Point", "Game", "Set", "Match Server", "Point Winner", "Detail"]
+    )
+    # A Settings sheet with no data row at all -> raw.settings is None
+    # (matches test_ingest_raises_when_points_is_empty_and_settings_is_missing's
+    # pattern - the sheet must exist or parse() itself raises an unrelated
+    # KeyError for the missing sheet).
+    workbook.create_sheet("Settings").append(["Host Team", "Guest Team"])
+    workbook.create_sheet("Shots").append(["Point", "Shot", "Player", "Type", "Stroke", "Result"])
+    part2 = tmp_path / "part2_no_settings.xlsx"
+    workbook.save(part2)
+
+    pipeline = SwingVisionImportPipeline(import_config)
+
+    with pytest.raises(ValueError, match="Settings sheet"):
+        pipeline.ingest_multi_part(
+            [part1, part2], date="2026-08-18", opponent="Real Opponent", result="W"
+        )
+
+
+def test_ingest_multi_part_rejects_a_pro_export_in_the_mix(tmp_path, import_config, synthetic_xlsx):
+    part2 = _build_non_pro_xlsx(
+        tmp_path, "part2.xlsx", [[1, 1, "Test Player", "first_serve", "Serve", "In"]]
+    )
+    pipeline = SwingVisionImportPipeline(import_config)
+
+    with pytest.raises(ValueError, match="Points sheet"):
+        pipeline.ingest_multi_part(
+            [synthetic_xlsx, part2], date="2026-08-18", opponent="Real Opponent", result="W"
+        )
+
+
+def test_suggest_re_merges_multi_part_files_using_source_point_number(tmp_path, import_config):
+    part1 = _build_non_pro_xlsx(
+        tmp_path,
+        "part1.xlsx",
+        [
+            [1, 1, "Test Player", "first_serve", "Serve", "In"],
+            [2, 1, "Test Player", "first_serve", "Serve", "In"],
+            [3, 1, "Test Player", "first_serve", "Serve", "In"],
+        ],
+    )
+    part2 = _build_non_pro_xlsx(
+        tmp_path, "part2.xlsx", [[1, 1, "Test Player", "first_serve", "Serve", "In"]]
+    )
+    pipeline = SwingVisionImportPipeline(import_config)
+    json_path = pipeline.ingest_multi_part(
+        [part1, part2], date="2026-08-18", opponent="Real Opponent", result="W"
+    )
+    client = _FakeSuggestionClient()
+
+    record = pipeline.suggest(client, json_path)
+
+    all_points = [p for s in record.sets for p in s.points]
+    assert all(p.ai_suggested_point_end_type == "forced_error" for p in all_points)
+    assert len(client.messages.calls) == len(all_points)

@@ -21,7 +21,7 @@ from ai.client import AnthropicClientLike
 from . import db, load, quality_check, reconstruct, review, review_assist
 from .config import ImportConfig
 from .parse import SwingVisionParser
-from .raw import RawMatchExport
+from .raw import RawSetRow, RawSettings
 from .records import MatchRecord
 from .review_assist import SuggestionConfig
 from .transform import transform
@@ -125,7 +125,108 @@ class SwingVisionImportPipeline:
             )
 
         record.import_notes = self._build_import_notes(
-            record, raw, reconstruction, first_server_by_set, tracked_identity
+            record, raw.sets, raw.settings, reconstruction, first_server_by_set, tracked_identity
+        )
+
+        json_path = review.save_pending(record, self.config.pending_dir)
+        flags = review.unresolved_flags(record)
+        logger.info(
+            "Staged %s vs %s at %s (%d point(s) need review)",
+            date, opponent, json_path, len(flags),
+        )
+        return json_path
+
+    def ingest_multi_part(
+        self,
+        xlsx_paths: list[Path],
+        *,
+        date: str,
+        opponent: str,
+        result: str,
+        first_server_by_set: dict[int, str] | None = None,
+        tracked_identity: str | None = None,
+        **match_overrides: object,
+    ) -> Path:
+        """Merges multiple exports of one interrupted match and stages it.
+
+        For a match whose recording was cut and resumed as separate
+        SwingVision files (each with its own restarting Point/Set
+        numbering) — reconstructing each file independently would produce
+        two wrong, incomplete scores (e.g. a set that spans the file
+        boundary looks like it never finished in either file). This merges
+        every file's Shots rows into one continuous sequence
+        (reconstruct.merge_shots) before reconstructing once, so a set
+        spanning the boundary gets one correct combined score.
+
+        Every file must be the Shots-reconstruction case (no Points-sheet
+        Pro rollup) with a matching Settings sheet — a Pro export in the
+        middle of an otherwise-reconstructed match isn't supported.
+
+        Args:
+            xlsx_paths: The exports, in play order (earliest first).
+            date: ISO-format date of the match.
+            opponent: Opponent's name.
+            result: Match result, "W" or "L".
+            first_server_by_set: See ingest().
+            tracked_identity: See ingest().
+            **match_overrides: Additional MatchRecord fields.
+
+        Returns:
+            Path to the staged pending-review JSON file.
+
+        Raises:
+            ValueError: If fewer than 2 paths are given, any file has a
+                populated Points sheet (Pro rollup — use ingest() instead),
+                any file is missing a Settings sheet, or the files disagree
+                on the tracked player's host name.
+        """
+        if len(xlsx_paths) < 2:
+            raise ValueError("ingest_multi_part needs at least 2 files - use ingest() for one.")
+
+        raw_exports = [self._parser.parse(p) for p in xlsx_paths]
+        for path, raw in zip(xlsx_paths, raw_exports, strict=True):
+            if raw.points:
+                raise ValueError(
+                    f"{path}: has a populated Points sheet (Pro rollup) - "
+                    "ingest_multi_part only supports Shots-based reconstruction."
+                )
+            if raw.settings is None:
+                raise ValueError(f"{path}: no Settings sheet to identify the tracked player.")
+        host_names = {raw.settings.host_name for raw in raw_exports}
+        if len(host_names) > 1:
+            raise ValueError(f"Files disagree on the tracked player's host name: {host_names}")
+        host_name = raw_exports[0].settings.host_name
+
+        logger.info(
+            "Merging %d files into one continuous reconstruction for %s vs %s",
+            len(xlsx_paths), date, opponent,
+        )
+        merged_shots = reconstruct.merge_shots([raw.shots for raw in raw_exports])
+        reconstruction = reconstruct.reconstruct_all(merged_shots, host_name)
+        shots_by_point = reconstruct.group_shots_by_point(merged_shots)
+        shot_pattern_summary = reconstruct.build_shot_pattern_summary(
+            reconstruction.points, shots_by_point
+        )
+        record = MatchRecord(
+            date=date,
+            opponent=opponent,
+            result=result,
+            source_files=[str(p) for p in xlsx_paths],
+            sets=reconstruction.sets,
+            shot_pattern_summary=shot_pattern_summary,
+            **match_overrides,
+        )
+        record.import_notes = self._build_import_notes(
+            record,
+            raw_sets=[],  # no single file's Sets-sheet summary is a valid reference here
+            settings=raw_exports[0].settings,
+            reconstruction=reconstruction,
+            first_server_by_set=first_server_by_set,
+            tracked_identity=tracked_identity,
+        )
+        record.import_notes.append(
+            f"Merged from {len(xlsx_paths)} files: assumes no points were lost exactly "
+            "at a file boundary (no shot data exists there to check)."
         )
 
         json_path = review.save_pending(record, self.config.pending_dir)
@@ -139,7 +240,8 @@ class SwingVisionImportPipeline:
     def _build_import_notes(
         self,
         record: MatchRecord,
-        raw: RawMatchExport,
+        raw_sets: list[RawSetRow],
+        settings: RawSettings | None,
         reconstruction: reconstruct.ReconstructionResult | None,
         first_server_by_set: dict[int, str] | None,
         tracked_identity: str | None,
@@ -148,7 +250,10 @@ class SwingVisionImportPipeline:
 
         Args:
             record: The MatchRecord just built (direct-parse or reconstructed).
-            raw: The raw parsed export, for cross-checking against Sets/Settings.
+            raw_sets: Raw Sets-sheet rows to cross-check the reconstructed
+                score against; empty for a merged multi-part match, where
+                no single file's Sets summary is a valid reference.
+            settings: Parsed Settings-sheet data, for the identity check.
             reconstruction: The reconstruction result, if the Shots-based
                 fallback path was used; None on the direct-parse path (no
                 gap/exclusion counts to report).
@@ -173,9 +278,9 @@ class SwingVisionImportPipeline:
                     f"non-match activity (e.g. a fed ball between points): "
                     f"{reconstruction.excluded_points}"
                 )
-        notes.extend(quality_check.check_score_against_sets_sheet(record.sets, raw.sets))
+        notes.extend(quality_check.check_score_against_sets_sheet(record.sets, raw_sets))
         notes.extend(quality_check.check_serve_order(record.sets, first_server_by_set))
-        notes.extend(quality_check.check_tracked_identity(raw.settings, tracked_identity))
+        notes.extend(quality_check.check_tracked_identity(settings, tracked_identity))
         return notes
 
     def suggest(
@@ -209,16 +314,25 @@ class SwingVisionImportPipeline:
             persist across the actual manual review.
 
         Raises:
-            ValueError: If the staged record has no source_file to
-                re-parse for shot context.
+            ValueError: If the staged record has neither source_file nor
+                source_files to re-parse.
         """
         record = review.load_pending(json_path)
-        if record.source_file is None:
-            raise ValueError(f"{json_path}: record has no source_file to re-parse.")
+        if record.source_files:
+            # Same merge as ingest_multi_part(), so source_point_number
+            # (assigned from the merged sequence at ingest time) maps
+            # correctly into this re-merged shots_by_point.
+            raw_exports = [self._parser.parse(Path(p)) for p in record.source_files]
+            shots_by_point = reconstruct.group_shots_by_point(
+                reconstruct.merge_shots([raw.shots for raw in raw_exports])
+            )
+        elif record.source_file is not None:
+            raw = self._parser.parse(Path(record.source_file))
+            shots_by_point = reconstruct.group_shots_by_point(raw.shots)
+        else:
+            raise ValueError(f"{json_path}: record has no source_file(s) to re-parse.")
 
         suggestion_config = suggestion_config or SuggestionConfig()
-        raw = self._parser.parse(Path(record.source_file))
-        shots_by_point = reconstruct.group_shots_by_point(raw.shots)
 
         suggested_count = 0
         for set_record in record.sets:

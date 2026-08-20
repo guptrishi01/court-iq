@@ -6,6 +6,7 @@ from swingvision_import.reconstruct import (
     assign_game_set_boundaries,
     build_shot_pattern_summary,
     group_shots_by_point,
+    merge_shots,
     reconstruct_all,
     reconstruct_point,
 )
@@ -320,3 +321,40 @@ def test_build_shot_pattern_summary_treats_a_missing_shot_lookup_as_zero_length(
     assert summary["avg_rally_length"] == 0.0
     assert summary["rally_win_rate_short"] == 100.0
     assert summary["rally_win_rate_long"] == 0.0
+
+
+def test_merge_shots_shifts_later_files_point_numbers_to_continue_the_sequence():
+    file1 = [
+        _shot(1, 1, HOST, "first_serve", "Serve", "In"),
+        _shot(2, 1, HOST, "first_serve", "Serve", "In"),
+    ]
+    file2 = [
+        # This file's own Point counter restarts from 1, like a real
+        # second-half export.
+        _shot(1, 1, GUEST, "first_serve", "Serve", "In"),
+        _shot(2, 1, GUEST, "first_serve", "Serve", "In"),
+    ]
+
+    merged = merge_shots([file1, file2])
+
+    assert [s.point_number for s in merged] == [1, 2, 3, 4]
+    # Original per-shot data is otherwise untouched.
+    assert merged[2].player == GUEST
+
+
+def test_merge_shots_with_a_single_file_leaves_point_numbers_unchanged():
+    file1 = [_shot(1, 1, HOST, "first_serve", "Serve", "In")]
+
+    merged = merge_shots([file1])
+
+    assert [s.point_number for s in merged] == [1]
+
+
+def test_merge_shots_handles_an_empty_file_without_disrupting_the_offset():
+    file1 = [_shot(1, 1, HOST, "first_serve", "Serve", "In")]
+    empty_file: list[RawShotRow] = []
+    file2 = [_shot(1, 1, GUEST, "first_serve", "Serve", "In")]
+
+    merged = merge_shots([file1, empty_file, file2])
+
+    assert [s.point_number for s in merged] == [1, 2]

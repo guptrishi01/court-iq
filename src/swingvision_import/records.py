@@ -112,7 +112,15 @@ class MatchRecord:
         cons: Self-reported "what needs work" notes.
         notes: Free-text notes for the match.
         source_file: Path to the SwingVision export this record was built
-            from, for traceability during review.
+            from, for traceability during review. None for a match merged
+            from multiple exports — see source_files instead.
+        source_files: Paths to the SwingVision exports this record was
+            merged from (in play order), for a match whose recording was
+            interrupted and split into multiple files — see
+            pipeline.ingest_multi_part and reconstruct.merge_shots. None
+            for a single-file match (the common case), which uses
+            source_file instead. suggest() checks this first before
+            falling back to source_file.
         sets: All sets played in this match, in play order.
         import_notes: Informational data-quality notes from quality_check.py
             (e.g. a reconstructed set score that doesn't match the Sets
@@ -138,6 +146,7 @@ class MatchRecord:
     cons: str | None = None
     notes: str | None = None
     source_file: str | None = None
+    source_files: list[str] | None = None
     sets: list[SetRecord] = field(default_factory=list)
     import_notes: list[str] = field(default_factory=list)
     shot_pattern_summary: dict[str, float] | None = None

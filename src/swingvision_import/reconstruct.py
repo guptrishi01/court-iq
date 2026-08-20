@@ -20,7 +20,7 @@ is exactly why nothing from this module is ever trusted un-reviewed.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from .raw import RawShotRow
 from .records import PointRecord, SetRecord
@@ -93,6 +93,38 @@ def group_shots_by_point(shots: list[RawShotRow]) -> dict[int, list[RawShotRow]]
     for point_shots in grouped.values():
         point_shots.sort(key=lambda s: s.shot_number)
     return grouped
+
+
+def merge_shots(shots_by_file: list[list[RawShotRow]]) -> list[RawShotRow]:
+    """Concatenates multiple exports' Shots rows into one continuous sequence.
+
+    For a match whose recording was interrupted and split into multiple
+    SwingVision exports — each file's own `Point` counter restarts from 1,
+    so simply concatenating the raw rows would collide. Each file's
+    point_number is shifted to continue right after the previous file's
+    highest point_number, so the combined sequence can be reconstructed as
+    one continuous match (one Set 1 spanning a file boundary, rather than
+    two independent, incorrectly-scored partial reconstructions).
+
+    This assumes files are given in play order and that no points were
+    lost exactly at a file boundary — there's no shot data to detect a gap
+    there, so none is fabricated; if the recording actually skipped a
+    point at the cut, this can't tell.
+
+    Args:
+        shots_by_file: Each file's raw Shots rows, in play order (file 0
+            played before file 1, etc.).
+
+    Returns:
+        One flat list with globally-unique, increasing point numbers.
+    """
+    merged: list[RawShotRow] = []
+    offset = 0
+    for shots in shots_by_file:
+        merged.extend(replace(shot, point_number=shot.point_number + offset) for shot in shots)
+        file_max = max((shot.point_number for shot in shots), default=0)
+        offset += file_max
+    return merged
 
 
 def _coarse_end_type(
