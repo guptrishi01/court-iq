@@ -39,6 +39,31 @@ class _Messages(Protocol):
     def create(self, **kwargs: object) -> _Message: ...
 
 
+def extract_text(response: _Message) -> str:
+    """Finds the first text block in a response, skipping non-text blocks.
+
+    Claude Sonnet 5 emits extended-thinking blocks ahead of its text block
+    by default, so `response.content[0]` is not reliably the text — a real
+    call against the live API confirmed `content[0]` can be a ThinkingBlock
+    with no `.text` attribute at all. Shared here rather than duplicated
+    because both ai/client.py and swingvision_import/review_assist.py parse
+    responses the same way.
+
+    Args:
+        response: The API response (or test fake) to extract text from.
+
+    Returns:
+        The first text block's content.
+
+    Raises:
+        ValueError: If the response has no block with type "text".
+    """
+    for block in response.content:
+        if getattr(block, "type", None) == "text":
+            return block.text
+    raise ValueError("Response contained no text block")
+
+
 class AnthropicClientLike(Protocol):
     """The minimal shape of anthropic.Anthropic this module depends on.
 
@@ -82,7 +107,7 @@ def call_specialist(
 
     Args:
         client: An anthropic.Anthropic-shaped client.
-        config: Model/token/temperature settings.
+        config: Model/token settings.
         category: "strategy", "drill", or "fitness" — selects which
             dataclass to parse items into.
         system_prompt: The specialist's full system prompt, already built
@@ -100,18 +125,17 @@ def call_specialist(
         response = client.messages.create(
             model=config.model,
             max_tokens=config.max_tokens,
-            temperature=config.temperature,
             system=system_prompt,
             messages=[{"role": "user", "content": "Generate the coaching items now."}],
         )
     except anthropic.APIError as exc:
         raise SpecialistError(category, "", exc) from exc
 
-    raw_text = response.content[0].text
-
     item_class = _ITEM_CLASSES[category]
     extra_fields = _EXTRA_FIELDS[category]
+    raw_text = ""
     try:
+        raw_text = extract_text(response)
         raw_items = json.loads(raw_text)
         return [
             item_class(
@@ -124,5 +148,5 @@ def call_specialist(
             )
             for raw in raw_items
         ]
-    except (json.JSONDecodeError, KeyError, TypeError) as exc:
+    except (ValueError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise SpecialistError(category, raw_text, exc) from exc

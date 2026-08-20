@@ -1,11 +1,19 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from ai.client import SpecialistError, call_specialist
 from ai.config import AICoachConfig
 from ai.records import DrillItem, FitnessItem
-from tests.ai.conftest import FakeAnthropicClient
+from tests.ai.conftest import (
+    FakeAnthropicClient,
+    FakeMessage,
+    FakeTextBlock,
+    FakeThinkingBlock,
+    canned_item,
+)
 
 
 def test_call_specialist_parses_a_valid_strategy_response():
@@ -55,16 +63,63 @@ def test_call_specialist_raises_specialist_error_on_missing_required_key():
         call_specialist(client, AICoachConfig(), "strategy", "You are a strategy analyst.")
 
 
-def test_call_specialist_passes_model_and_sampling_config_through():
+def test_call_specialist_passes_model_and_token_config_through():
     client = FakeAnthropicClient()
-    config = AICoachConfig(model="claude-sonnet-5", max_tokens=512, temperature=0.3)
+    config = AICoachConfig(model="claude-sonnet-5", max_tokens=512)
 
     call_specialist(client, config, "strategy", "You are a strategy analyst.")
 
     call = client.messages.calls[0]
     assert call["model"] == "claude-sonnet-5"
     assert call["max_tokens"] == 512
-    assert call["temperature"] == 0.3
+    assert "temperature" not in call
+
+
+class _ThinkingFirstMessages:
+    """Stands in for a real Claude Sonnet 5 response: a ThinkingBlock ahead
+    of the text block, confirmed against the live API - content[0] is not
+    reliably the text block."""
+
+    def create(self, **kwargs: object) -> FakeMessage:
+        payload = json.dumps([canned_item("strategy")])
+        return FakeMessage(
+            content=[FakeThinkingBlock(thinking="reasoning..."), FakeTextBlock(text=payload)]
+        )
+
+
+class _ThinkingFirstClient:
+    def __init__(self) -> None:
+        self.messages = _ThinkingFirstMessages()
+
+
+class _ThinkingOnlyMessages:
+    """A response with no text block at all."""
+
+    def create(self, **kwargs: object) -> FakeMessage:
+        return FakeMessage(content=[FakeThinkingBlock(thinking="reasoning...")])
+
+
+class _ThinkingOnlyClient:
+    def __init__(self) -> None:
+        self.messages = _ThinkingOnlyMessages()
+
+
+def test_call_specialist_skips_a_leading_thinking_block_to_find_the_text():
+    items = call_specialist(
+        _ThinkingFirstClient(), AICoachConfig(), "strategy", "You are a strategy analyst."
+    )
+
+    assert len(items) == 1
+    assert items[0].category == "strategy"
+
+
+def test_call_specialist_raises_specialist_error_when_no_text_block_exists():
+    with pytest.raises(SpecialistError) as exc_info:
+        call_specialist(
+            _ThinkingOnlyClient(), AICoachConfig(), "strategy", "You are a strategy analyst."
+        )
+
+    assert exc_info.value.raw_response == ""
 
 
 def test_call_specialist_wraps_a_real_api_failure_as_specialist_error():

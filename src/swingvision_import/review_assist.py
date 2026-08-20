@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 import anthropic
 
-from ai.client import AnthropicClientLike
+from ai.client import AnthropicClientLike, extract_text
 
 from .raw import RawShotRow
 from .records import PointRecord
@@ -48,12 +48,10 @@ class SuggestionConfig:
     Attributes:
         model: Claude model id.
         max_tokens: Max output tokens per call.
-        temperature: Sampling temperature.
     """
 
     model: str = "claude-sonnet-5"
     max_tokens: int = 512
-    temperature: float = 0.3
 
 
 @dataclass(frozen=True)
@@ -142,7 +140,7 @@ def suggest_point_resolution(
     Args:
         client: An anthropic.Anthropic-shaped client (injected so tests
             never hit the real API or spend real money).
-        config: Model/token/temperature settings.
+        config: Model/token settings.
         point: The flagged point to get a suggestion for.
         shot_context: The point's raw shots, for Claude to reason over.
 
@@ -160,15 +158,15 @@ def suggest_point_resolution(
         response = client.messages.create(
             model=config.model,
             max_tokens=config.max_tokens,
-            temperature=config.temperature,
             system=system_prompt,
             messages=[{"role": "user", "content": "Suggest the classification now."}],
         )
     except anthropic.APIError as exc:
         raise SuggestionError("", exc) from exc
 
-    raw_text = response.content[0].text
+    raw_text = ""
     try:
+        raw_text = extract_text(response)
         data = json.loads(raw_text)
         point_end_type = data["point_end_type"]
         if point_end_type not in _VALID_END_TYPES:
@@ -178,5 +176,5 @@ def suggest_point_resolution(
             reasoning=data["reasoning"],
             confidence=data["confidence"],
         )
-    except (json.JSONDecodeError, KeyError, TypeError, ValueError) as exc:
+    except (ValueError, json.JSONDecodeError, KeyError, TypeError) as exc:
         raise SuggestionError(raw_text, exc) from exc

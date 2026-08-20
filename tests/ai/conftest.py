@@ -64,6 +64,13 @@ def _category_from_system_prompt(system: str) -> str:
 @dataclass
 class FakeTextBlock:
     text: str
+    type: str = "text"
+
+
+@dataclass
+class FakeThinkingBlock:
+    thinking: str
+    type: str = "thinking"
 
 
 @dataclass

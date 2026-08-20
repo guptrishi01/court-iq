@@ -26,7 +26,7 @@ def generate_all(
 
     Args:
         client: An anthropic.Anthropic-shaped client.
-        config: Model/token/temperature/item-count settings.
+        config: Model/token/item-count settings.
         context: The fixed context all three specialists see.
 
     Returns:

@@ -17,7 +17,6 @@ class AICoachConfig:
     Attributes:
         model: Claude model id used for all three specialists.
         max_tokens: Max output tokens per specialist call.
-        temperature: Sampling temperature for the specialist calls.
         strategy_item_bounds: (min, max) strategy items to request.
         drill_item_bounds: (min, max) drill items to request.
         fitness_item_bounds: (min, max) fitness items to request — smaller
@@ -29,7 +28,6 @@ class AICoachConfig:
 
     model: str = DEFAULT_MODEL
     max_tokens: int = 1024
-    temperature: float = 0.7
     strategy_item_bounds: tuple[int, int] = (2, 4)
     drill_item_bounds: tuple[int, int] = (2, 4)
     fitness_item_bounds: tuple[int, int] = (1, 3)

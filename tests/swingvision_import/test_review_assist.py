@@ -13,7 +13,7 @@ from swingvision_import.review_assist import (
     SuggestionError,
     suggest_point_resolution,
 )
-from tests.ai.conftest import FakeMessage, FakeTextBlock
+from tests.ai.conftest import FakeMessage, FakeTextBlock, FakeThinkingBlock
 
 
 class _FakeMessages:
@@ -39,6 +39,25 @@ class _FakeMessages:
 class _FakeClient:
     def __init__(self, response_text: str | None = None, raise_error: Exception | None = None):
         self.messages = _FakeMessages(response_text, raise_error)
+
+
+class _ThinkingFirstMessages:
+    """Stands in for a real Claude Sonnet 5 response: a ThinkingBlock ahead
+    of the text block, confirmed against the live API - content[0] is not
+    reliably the text block."""
+
+    def __init__(self, content: list):
+        self.content = content
+        self.calls: list[dict] = []
+
+    def create(self, **kwargs):
+        self.calls.append(kwargs)
+        return FakeMessage(content=self.content)
+
+
+class _ThinkingFirstClient:
+    def __init__(self, content: list):
+        self.messages = _ThinkingFirstMessages(content)
 
 
 def _point() -> PointRecord:
@@ -121,14 +140,34 @@ def test_suggest_point_resolution_raises_on_missing_required_key():
         suggest_point_resolution(client, SuggestionConfig(), _point(), _shots())
 
 
-def test_suggest_point_resolution_passes_model_and_sampling_config_through():
+def test_suggest_point_resolution_passes_model_and_token_config_through():
     valid = json.dumps({"point_end_type": "winner", "reasoning": "x", "confidence": "high"})
     client = _FakeClient(response_text=valid)
-    config = SuggestionConfig(model="claude-sonnet-5", max_tokens=256, temperature=0.1)
+    config = SuggestionConfig(model="claude-sonnet-5", max_tokens=256)
 
     suggest_point_resolution(client, config, _point(), _shots())
 
     call = client.messages.calls[0]
     assert call["model"] == "claude-sonnet-5"
     assert call["max_tokens"] == 256
-    assert call["temperature"] == 0.1
+    assert "temperature" not in call
+
+
+def test_suggest_point_resolution_skips_a_leading_thinking_block_to_find_the_text():
+    valid = json.dumps({"point_end_type": "winner", "reasoning": "x", "confidence": "high"})
+    client = _ThinkingFirstClient(
+        content=[FakeThinkingBlock(thinking="reasoning..."), FakeTextBlock(text=valid)]
+    )
+
+    suggestion = suggest_point_resolution(client, SuggestionConfig(), _point(), _shots())
+
+    assert suggestion.point_end_type == "winner"
+
+
+def test_suggest_point_resolution_raises_when_no_text_block_exists():
+    client = _ThinkingFirstClient(content=[FakeThinkingBlock(thinking="reasoning...")])
+
+    with pytest.raises(SuggestionError) as exc_info:
+        suggest_point_resolution(client, SuggestionConfig(), _point(), _shots())
+
+    assert exc_info.value.raw_response == ""

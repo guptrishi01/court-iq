@@ -142,7 +142,7 @@ class SwingVisionImportPipeline:
                 tests never hit the real API or spend real money).
             json_path: Path to a pending JSON file previously written by
                 ingest().
-            suggestion_config: Model/token/temperature settings. Defaults
+            suggestion_config: Model/token settings. Defaults
                 to SuggestionConfig() if not given.
 
         Returns:
