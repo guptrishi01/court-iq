@@ -30,6 +30,24 @@ logger = logging.getLogger(__name__)
 _SERVE_TYPES = frozenset({"first_serve", "second_serve"})
 _NET_STROKES = frozenset({"Volley", "Forehand Volley", "Backhand Volley", "Overhead"})
 
+# Every real Shots `Type` value that represents an actual rally shot. A point
+# whose shots are all outside this set (Type == "none", e.g. a Stroke=="Feed"
+# ball sent across between points) isn't part of live play at all - confirmed
+# against real data: e.g. one point is exactly "host feeds the ball in,
+# opponent nets a backhand," not a served point. Excluding these is different
+# from a gap (zero shots): these points have shots, they're just not tennis.
+_RALLY_SHOT_TYPES = frozenset(
+    {
+        "first_serve",
+        "second_serve",
+        "first_return",
+        "second_return",
+        "serve_plus_one",
+        "return_plus_one",
+        "in_play",
+    }
+)
+
 
 @dataclass(frozen=True)
 class ReconstructedPoint:
@@ -319,9 +337,42 @@ def assign_game_set_boundaries(
     return sets
 
 
+@dataclass(frozen=True)
+class ReconstructionResult:
+    """The full output of reconstructing a match from its Shots sheet.
+
+    Attributes:
+        sets: The reconstructed sets, with game/set boundaries assigned.
+        skipped_points: Match-wide point numbers with zero shots at all —
+            a true gap (a recording dropout), never fabricated.
+        excluded_points: Match-wide point numbers that had shots, but none
+            of them were a rally-type shot (Type != "none") — e.g. a
+            Stroke=="Feed" ball sent across between points. Not part of
+            live play, so excluded rather than counted as a real point;
+            distinct from skipped_points because these aren't a data gap,
+            they're correctly-tracked non-match activity.
+    """
+
+    sets: list[SetRecord]
+    skipped_points: list[int]
+    excluded_points: list[int]
+
+
+def _has_rally_shot(shots: list[RawShotRow]) -> bool:
+    """Whether at least one shot in a point is an actual rally-type shot.
+
+    Args:
+        shots: A single point's shots.
+
+    Returns:
+        True if any shot's type is in _RALLY_SHOT_TYPES.
+    """
+    return any(s.shot_type in _RALLY_SHOT_TYPES for s in shots)
+
+
 def reconstruct_all(
     shots: list[RawShotRow], host_name: str, *, ad_scoring: bool = True
-) -> tuple[list[SetRecord], list[int]]:
+) -> ReconstructionResult:
     """Full pipeline: Shots rows -> SetRecords, for use when Points is empty.
 
     Args:
@@ -330,23 +381,26 @@ def reconstruct_all(
         ad_scoring: Passed through to assign_game_set_boundaries.
 
     Returns:
-        (sets, skipped_point_numbers) — the reconstructed sets, and the
-        sorted list of match-wide point numbers that had zero shots (gaps)
-        and were skipped rather than fabricated.
+        A ReconstructionResult with the reconstructed sets plus the
+        skipped (gap) and excluded (non-match) point numbers, both
+        reported rather than silently dropped or fabricated.
     """
     grouped = group_shots_by_point(shots)
     points: list[ReconstructedPoint] = []
     skipped: list[int] = []
+    excluded: list[int] = []
     if grouped:
         # A gap point number has zero shots, so it never becomes a key in
         # `grouped` at all - iterating its keys would silently skip past
         # it. Walking the full min..max range is what actually finds gaps.
         for point_number in range(min(grouped), max(grouped) + 1):
             point_shots = grouped.get(point_number, [])
-            reconstructed = reconstruct_point(point_number, point_shots, host_name)
-            if reconstructed is None:
+            if not point_shots:
                 skipped.append(point_number)
+            elif not _has_rally_shot(point_shots):
+                excluded.append(point_number)
             else:
+                reconstructed = reconstruct_point(point_number, point_shots, host_name)
                 points.append(reconstructed)
 
     if skipped:
@@ -355,6 +409,13 @@ def reconstruct_all(
             len(skipped),
             skipped,
         )
+    if excluded:
+        logger.info(
+            "Excluded %d point(s) with no rally-type shot (not part of live play, "
+            "e.g. a fed ball between points): %s",
+            len(excluded),
+            excluded,
+        )
 
     sets = assign_game_set_boundaries(points, ad_scoring=ad_scoring)
-    return sets, skipped
+    return ReconstructionResult(sets=sets, skipped_points=skipped, excluded_points=excluded)

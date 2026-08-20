@@ -245,8 +245,31 @@ def test_reconstruct_all_skips_gaps_and_reports_them():
         _shot(3, 1, HOST, "first_serve", "Serve", "In"),
     ]
 
-    sets, skipped = reconstruct_all(shots, HOST)
+    result = reconstruct_all(shots, HOST)
 
-    assert skipped == [2]
-    total_points = sum(len(s.points) for s in sets)
+    assert result.skipped_points == [2]
+    assert result.excluded_points == []
+    total_points = sum(len(s.points) for s in result.sets)
+    assert total_points == 2
+
+
+def test_reconstruct_all_excludes_points_with_no_rally_shot_but_does_not_skip_them():
+    # Point 2 here is exactly the real pattern found in production data: the
+    # host feeds a ball across (Type=="none") and the guest nets it back -
+    # never a served point, so it must not be treated as a gap or as a real
+    # point that shifts subsequent point/game numbering.
+    shots = [
+        _shot(1, 1, HOST, "first_serve", "Serve", "In"),
+        _shot(1, 2, GUEST, "first_return", "Forehand", "Net"),
+        _shot(2, 0, HOST, "none", "Feed", "In"),
+        _shot(2, 1, GUEST, "none", "Backhand", "Net"),
+        _shot(3, 1, HOST, "first_serve", "Serve", "In"),
+        _shot(3, 2, GUEST, "first_return", "Forehand", "Net"),
+    ]
+
+    result = reconstruct_all(shots, HOST)
+
+    assert result.excluded_points == [2]
+    assert result.skipped_points == []
+    total_points = sum(len(s.points) for s in result.sets)
     assert total_points == 2

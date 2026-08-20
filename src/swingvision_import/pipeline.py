@@ -97,19 +97,15 @@ class SwingVisionImportPipeline:
                 "(SwingVision's point rollup needs Pro; shot tracking doesn't).",
                 xlsx_path,
             )
-            sets, skipped = reconstruct.reconstruct_all(raw.shots, raw.settings.host_name)
-            if skipped:
-                logger.warning(
-                    "%d point(s) skipped during reconstruction (no shot data): %s",
-                    len(skipped),
-                    skipped,
-                )
+            # reconstruct_all logs its own skipped/excluded warnings; no need
+            # to re-log here.
+            reconstruction = reconstruct.reconstruct_all(raw.shots, raw.settings.host_name)
             record = MatchRecord(
                 date=date,
                 opponent=opponent,
                 result=result,
                 source_file=str(xlsx_path),
-                sets=sets,
+                sets=reconstruction.sets,
                 **match_overrides,
             )
 
