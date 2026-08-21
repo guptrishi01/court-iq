@@ -38,11 +38,54 @@ def test_index_renders_form(client):
     assert b"Import a SwingVision match" in response.data
 
 
+def test_index_shows_empty_state_when_nothing_is_finalized(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert b"No matches finalized yet" in response.data
+    assert b"<iframe" not in response.data
+
+
+def test_index_shows_finalized_match_trends_and_list(client, finalized_match_id):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert b"<iframe" in response.data
+    assert b"Alex" in response.data
+    assert f'/report/{finalized_match_id}'.encode() in response.data
+
+
+def test_report_renders_a_finalized_match(client, finalized_match_id):
+    response = client.get(f"/report/{finalized_match_id}")
+
+    assert response.status_code == 200
+    assert b"Alex" in response.data
+
+
+def test_report_404s_for_an_unknown_match(client):
+    response = client.get("/report/999")
+
+    assert response.status_code == 404
+
+
+def test_report_never_constructs_a_real_client(client, finalized_match_id, monkeypatch):
+    def _fail_if_called():
+        raise AssertionError("view_report must never construct a real Anthropic client")
+
+    monkeypatch.setattr("webapp.app.get_anthropic_client", _fail_if_called)
+
+    response = client.get(f"/report/{finalized_match_id}")
+
+    assert response.status_code == 200
+
+
 def test_import_stages_pending_json_matching_direct_ingest(client, xlsx_bytes, import_config):
     response = _upload(client, xlsx_bytes)
 
     assert response.status_code == 200
     assert b"Staged: 2026-08-06 vs Alex" in response.data
+    # A fragment for the fetch-based submit flow to inject, not a full page.
+    assert b"<html" not in response.data
 
     json_path = import_config.pending_dir / "2026-08-06_Alex.json"
     assert json_path.exists()
@@ -129,3 +172,4 @@ def test_suggest_runs_claude_assist_and_shows_updated_notes(
 
     assert response.status_code == 200
     assert b"Claude suggestions have been added" in response.data
+    assert b"<html" not in response.data

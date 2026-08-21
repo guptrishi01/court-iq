@@ -7,6 +7,9 @@ import pytest
 from openpyxl import Workbook
 
 from swingvision_import.config import ImportConfig
+from swingvision_import.db import get_connection
+from swingvision_import.load import finalize_and_load
+from swingvision_import.records import MatchRecord, PointRecord, SetRecord
 from tests.swingvision_import.conftest import add_settings_and_shots_sheets
 from webapp.app import create_app
 from webapp.config import WebAppConfig
@@ -66,3 +69,30 @@ def app(import_config: ImportConfig, webapp_config: WebAppConfig):
 @pytest.fixture
 def client(app):
     return app.test_client()
+
+
+@pytest.fixture
+def finalized_match_id(import_config: ImportConfig) -> int:
+    """Seeds a fully-reviewed, finalized match directly into the app's own
+    db_path, so it's visible to the running app's routes exactly like a
+    real match that went through review + finalize() would be."""
+    connection = get_connection(import_config.db_path, import_config.schema_path)
+    record = MatchRecord(
+        date="2026-08-06",
+        opponent="Alex",
+        result="W",
+        sets=[
+            SetRecord(
+                set_number=1,
+                games_won=6,
+                games_lost=4,
+                points=[
+                    PointRecord(1, 1, True, True, "ace"),
+                    PointRecord(1, 2, False, False, "unforced_error"),
+                ],
+            ),
+        ],
+    )
+    match_id = finalize_and_load(connection, record)
+    connection.close()
+    return match_id

@@ -17,7 +17,6 @@ trend report instead of a single match's report.
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import sys
 from pathlib import Path
 
@@ -29,14 +28,9 @@ from ai.pipeline import AICoachPipeline  # noqa: E402
 from logging_config import configure_logging  # noqa: E402
 from reports.render import render_history_report_to_file, render_match_report_to_file  # noqa: E402
 from scripts.client import get_anthropic_client  # noqa: E402
-from stats.queries import match_stats  # noqa: E402
+from stats.queries import all_match_ids, match_stats  # noqa: E402
 from swingvision_import.config import ImportConfig  # noqa: E402
 from swingvision_import.db import get_connection  # noqa: E402
-
-
-def _all_match_ids(connection: sqlite3.Connection) -> list[int]:
-    rows = connection.execute("SELECT match_id FROM match ORDER BY date").fetchall()
-    return [row[0] for row in rows]
 
 
 def main() -> None:
@@ -61,7 +55,7 @@ def main() -> None:
     connection = get_connection(import_config.db_path, import_config.schema_path)
 
     if args.history:
-        stats = [match_stats(connection, match_id) for match_id in _all_match_ids(connection)]
+        stats = [match_stats(connection, match_id) for match_id in all_match_ids(connection)]
         output_path = render_history_report_to_file(stats, output_path=args.output)
     else:
         stats = match_stats(connection, args.match_id)

@@ -7,6 +7,7 @@ import pytest
 
 from stats.models import PointRow
 from stats.queries import (
+    all_match_ids,
     clutch_stats_from_points,
     match_stats,
     net_stats_from_points,
@@ -189,3 +190,30 @@ def test_match_stats_raises_for_an_unknown_match_id(tmp_path: Path):
 
     with pytest.raises(ValueError, match="999"):
         match_stats(connection, match_id=999)
+
+
+def test_all_match_ids_returns_empty_list_for_a_fresh_database(tmp_path: Path):
+    connection = sqlite3.connect(tmp_path / "empty.db")
+    connection.executescript(_SCHEMA_PATH.read_text(encoding="utf-8"))
+
+    assert all_match_ids(connection) == []
+
+
+def test_all_match_ids_orders_by_date(tmp_path: Path):
+    connection, first_match_id = _seed_match(tmp_path)  # date=2026-08-06
+    later_record = MatchRecord(
+        date="2026-08-13",
+        opponent="Jordan",
+        result="L",
+        sets=[SetRecord(set_number=1, games_won=4, games_lost=6, points=[])],
+    )
+    later_match_id = finalize_and_load(connection, later_record)
+    earlier_record = MatchRecord(
+        date="2026-07-30",
+        opponent="Sam",
+        result="W",
+        sets=[SetRecord(set_number=1, games_won=6, games_lost=1, points=[])],
+    )
+    earlier_match_id = finalize_and_load(connection, earlier_record)
+
+    assert all_match_ids(connection) == [earlier_match_id, first_match_id, later_match_id]

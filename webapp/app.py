@@ -1,14 +1,23 @@
-"""Flask entry point: a local intake form for staging a SwingVision match.
+"""Flask entry point: a local two-tab app for staging and browsing matches.
 
 Reuses SwingVisionImportPipeline.ingest()/suggest() exactly as
-scripts/import_match.py does - a second front door onto the same pipeline,
-not a parallel implementation. Scope is intentionally bounded to intake
-plus a read-only results page; resolving needs_review flags is still a
-hand-edit-the-JSON step (or the existing CLI), not built here.
+scripts/import_match.py does, and stats.queries/reports.render exactly as
+scripts/generate_report.py does - a second front door onto the same
+pipelines, not a parallel implementation.
+
+The Input tab stages a match for review (unchanged pipeline underneath);
+the Results tab shows already-finalized matches only - a match can never
+be auto-finalized (every point needs a human to confirm it via
+needs_review), so a freshly-submitted match won't appear there until it's
+been separately reviewed and finalized (today, still a CLI step:
+scripts/resolve_reviews.py / pipeline.finalize()). Viewing a match's
+report never spends API money - it only reads whatever AI coaching report
+is already cached on disk, never constructs a client.
 """
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -18,9 +27,14 @@ sys.path.insert(0, str(_REPO_ROOT))
 
 from flask import Flask, render_template, request  # noqa: E402
 
+from ai.config import AICoachConfig  # noqa: E402
+from ai.records import CoachingReport  # noqa: E402
 from logging_config import configure_logging  # noqa: E402
+from reports.render import render_history_report, render_match_report  # noqa: E402
 from scripts.client import get_anthropic_client  # noqa: E402
+from stats.queries import all_match_ids, match_stats  # noqa: E402
 from swingvision_import.config import ImportConfig  # noqa: E402
+from swingvision_import.db import get_connection  # noqa: E402
 from swingvision_import.pipeline import SwingVisionImportPipeline  # noqa: E402
 from swingvision_import.review import load_pending, unresolved_flags  # noqa: E402
 from webapp.config import WebAppConfig  # noqa: E402
@@ -70,10 +84,10 @@ def _parse_match_overrides(form) -> dict[str, object]:
     return overrides
 
 
-def _render_result(record, json_path: Path, *, suggested: bool):
+def _render_status(record, json_path: Path, *, suggested: bool):
     flags = unresolved_flags(record)
     return render_template(
-        "import_result.html.jinja",
+        "_import_status.html.jinja",
         json_filename=json_path.name,
         date=record.date,
         opponent=record.opponent,
@@ -81,6 +95,28 @@ def _render_result(record, json_path: Path, *, suggested: bool):
         import_notes=record.import_notes,
         suggested=suggested,
     )
+
+
+def _load_cached_coaching_report(match_id: int) -> CoachingReport | None:
+    """Best-effort loads a match's AI coaching report from disk, if cached.
+
+    Never constructs a client or calls the API - viewing a report must
+    never spend real money. Degrades to None on a missing or unreadable
+    file, same as every other optional-enrichment lookup in this codebase.
+
+    Args:
+        match_id: The match to look up a cached report for.
+
+    Returns:
+        The cached CoachingReport, or None if there isn't one.
+    """
+    report_path = AICoachConfig().reports_dir / f"{match_id}.json"
+    if not report_path.exists():
+        return None
+    try:
+        return CoachingReport.from_dict(json.loads(report_path.read_text(encoding="utf-8")))
+    except (OSError, ValueError, TypeError):
+        return None
 
 
 def create_app(
@@ -111,9 +147,31 @@ def create_app(
     app.config["MAX_CONTENT_LENGTH"] = webapp_config.max_content_length
     pipeline = SwingVisionImportPipeline(import_config)
 
+    def _connection():
+        return get_connection(import_config.db_path, import_config.schema_path)
+
     @app.get("/")
     def index():
-        return render_template("import_form.html.jinja")
+        connection = _connection()
+        try:
+            matches = [match_stats(connection, mid) for mid in all_match_ids(connection)]
+        finally:
+            connection.close()
+        history_html = render_history_report(matches) if matches else None
+        return render_template("index.html.jinja", matches=matches, history_html=history_html)
+
+    @app.get("/report/<int:match_id>")
+    def view_report(match_id: int):
+        connection = _connection()
+        try:
+            try:
+                stats = match_stats(connection, match_id)
+            except ValueError:
+                return "Match not found.", 404
+        finally:
+            connection.close()
+        coaching_report = _load_cached_coaching_report(match_id)
+        return render_match_report(stats, coaching_report)
 
     @app.post("/import")
     def do_import():
@@ -121,8 +179,7 @@ def create_app(
         if xlsx_file is None or not xlsx_file.filename:
             return (
                 render_template(
-                    "import_form.html.jinja",
-                    error="Please choose a SwingVision .xlsx export.",
+                    "_import_status.html.jinja", error="Please choose a SwingVision .xlsx export."
                 ),
                 400,
             )
@@ -150,9 +207,9 @@ def create_app(
                 **_parse_match_overrides(request.form),
             )
         except ValueError as exc:
-            return render_template("import_form.html.jinja", error=str(exc)), 400
+            return render_template("_import_status.html.jinja", error=str(exc)), 400
 
-        return _render_result(load_pending(json_path), json_path, suggested=False)
+        return _render_status(load_pending(json_path), json_path, suggested=False)
 
     @app.post("/suggest")
     def do_suggest():
@@ -165,7 +222,7 @@ def create_app(
         client = get_anthropic_client()
         record = pipeline.suggest(client, json_path)
 
-        return _render_result(record, json_path, suggested=True)
+        return _render_status(record, json_path, suggested=True)
 
     return app
 

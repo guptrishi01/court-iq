@@ -297,3 +297,17 @@ def match_stats(conn: sqlite3.Connection, match_id: int, set_id: int | None = No
             cons=cons,
         ),
     )
+
+
+def all_match_ids(conn: sqlite3.Connection) -> list[int]:
+    """Lists every finalized match's id, oldest first.
+
+    Args:
+        conn: An open SQLite connection.
+
+    Returns:
+        match_id for every row in `match`, ordered by date. Empty if no
+        match has been finalized yet.
+    """
+    rows = conn.execute("SELECT match_id FROM match ORDER BY date").fetchall()
+    return [row[0] for row in rows]
